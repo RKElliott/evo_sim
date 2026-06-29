@@ -1,0 +1,11 @@
+[workspace]
+members  = ["sim", "utils"]
+resolver = "2"
+
+# Release profile lives here, at the workspace root, on purpose.
+# Cargo only honors [profile.*] in the workspace root — the same block in a
+# member crate (sim/) is ignored WITH A WARNING. Moving it here preserves
+# opt-level 3 + LTO for the release WASM build. Do not move it back into sim/.
+[profile.release]
+opt-level = 3
+lto       = true

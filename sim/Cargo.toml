@@ -1,0 +1,22 @@
+[package]
+name        = "evo_sim"
+version     = "0.1.0"
+edition     = "2021"
+description = "Evolution simulator — Rust/WASM simulation core"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+utils        = { path = "../utils" }
+
+# Enabling sim's `trace` feature turns on the tracer in utils. Build traced with:
+#   wasm-pack build --target web --release -- --features trace
+# Absent (the default/public build), all tracer call sites compile out.
+[features]
+trace = ["utils/trace"]
+
+# NOTE: [profile.release] now lives in the workspace root (../Cargo.toml).
+# Cargo ignores profile settings declared in a member crate, so it must not
+# be re-added here.

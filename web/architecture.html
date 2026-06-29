@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evolution Simulator — Architecture</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #1a1e28;
+    color: #d8e0f0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 48px;
+    gap: 24px;
+  }
+  header { text-align: center; }
+  header h1 {
+    font-size: 22px; font-weight: 400; letter-spacing: 0.06em;
+    color: #90b8e0; margin-bottom: 6px;
+  }
+  header p { font-size: 13px; color: #6880a0; }
+
+  .diagram {
+    width: 100%; max-width: 920px;
+    background: #1e2230;
+    border: 0.5px solid #2e3848;
+    border-radius: 14px;
+    padding: 28px;
+  }
+
+  .layer {
+    border-radius: 10px;
+    padding: 16px 16px 18px;
+    margin-bottom: 8px;
+  }
+  .layer-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+  .layer-title {
+    font-size: 15px; font-weight: 500; margin-bottom: 3px;
+  }
+  .layer-subtitle {
+    font-size: 11px; opacity: 0.75; margin-bottom: 12px;
+  }
+  .layer-cards { display: grid; gap: 10px; }
+  .layer-cards.cols-3 { grid-template-columns: repeat(3, 1fr); }
+
+  .card {
+    border-radius: 8px;
+    padding: 11px 13px;
+    font-size: 12px;
+    line-height: 1.75;
+  }
+  .card-title {
+    font-size: 13px; font-weight: 500;
+    margin-bottom: 5px; display: block;
+  }
+  .card-item { color: #a0b0c8; display: block; }
+  .card-item::before { content: "·  "; opacity: 0.5; }
+
+  .connector {
+    display: flex; align-items: center; justify-content: center;
+    gap: 10px; padding: 4px 0; font-size: 11px; color: #6878a0;
+  }
+  .connector-line { flex: 1; max-width: 120px; height: 0.5px; background: currentColor; }
+  .connector-arrow { font-size: 14px; line-height: 1; }
+
+  /* ── Rust layer — green ── */
+  .rust { background: #182820; border: 0.5px solid #2e5038; }
+  .rust .layer-label { color: #60a878; }
+  .rust .layer-title { color: #70e8a8; }
+  .rust .card { background: #1e3028; border: 0.5px solid #345840; }
+  .rust .card-title { color: #80d898; }
+
+  /* ── TypeScript layer — blue ── */
+  .ts { background: #182030; border: 0.5px solid #2e4060; }
+  .ts .layer-label { color: #5878b8; }
+  .ts .layer-title { color: #78b8f0; }
+  .ts .card { background: #1e2838; border: 0.5px solid #344860; }
+  .ts .card-title { color: #88b8e0; }
+
+  /* ── Renderer layer — purple ── */
+  .renderer { background: #221830; border: 0.5px solid #423058; }
+  .renderer .layer-label { color: #8858b8; }
+  .renderer .layer-title { color: #c880f0; }
+  .renderer .card { background: #281e38; border: 0.5px solid #483860; }
+  .renderer .card-title { color: #b878e0; }
+
+  /* ── Config layer — amber ── */
+  .config { background: #281e10; border: 0.5px solid #504028; }
+  .config .layer-label { color: #a07830; }
+  .config .layer-title { color: #e0b040; }
+  .config .card { background: #302418; border: 0.5px solid #584830; }
+  .config .card-title { color: #d0a038; }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-block; font-size: 9px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 4px; margin-left: 8px;
+    vertical-align: middle;
+  }
+  .badge-worker { background: #183028; color: #70e098; border: 0.5px solid #387050; }
+  .badge-main   { background: #182038; color: #78a8d8; border: 0.5px solid #385880; }
+  .badge-zero   { background: #281810; color: #e07040; border: 0.5px solid #604030; }
+
+  .phase-current {
+    display: inline-block; font-size: 9px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    background: #183828; color: #70e098;
+    border: 0.5px solid #387050;
+    padding: 2px 8px; border-radius: 4px;
+    margin-left: 8px; vertical-align: middle;
+  }
+  .phase-planned {
+    display: inline-block; font-size: 9px;
+    background: #282018; color: #b89050;
+    border: 0.5px solid #605030;
+    padding: 2px 8px; border-radius: 4px;
+    margin-left: 8px; vertical-align: middle;
+  }
+
+  /* ── Note cards ── */
+  .notes {
+    width: 100%; max-width: 920px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  }
+  .note-card {
+    background: #1e2230; border: 0.5px solid #2e3848;
+    border-radius: 10px; padding: 16px 18px;
+  }
+  .note-title {
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: #6888a8; margin-bottom: 10px;
+  }
+  .note-item { font-size: 12px; color: #90a8c0; line-height: 1.9; }
+  .note-item b { color: #a8c8e8; font-weight: 500; }
+
+  @media (max-width: 640px) {
+    .layer-cards.cols-3 { grid-template-columns: 1fr 1fr; }
+    .notes { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Evolution Simulator — System Architecture</h1>
+  <p>Rust/WASM simulation core · TypeScript coordinator · Canvas 2D renderer</p>
+</header>
+
+<div class="diagram">
+
+  <!-- ── RUST / WASM ── -->
+  <div class="layer rust">
+    <div class="layer-label">Layer 1</div>
+    <div class="layer-title">
+      Simulation Core
+      <span class="badge badge-worker">Web Worker</span>
+      <span class="phase-current">Phase 1 active</span>
+    </div>
+    <div class="layer-subtitle">
+      Pure Rust compiled to WebAssembly · Runs on a separate thread · Zero GC · Shared buffer output
+    </div>
+    <div class="layer-cards cols-3">
+
+      <div class="card">
+        <span class="card-title">Terrain <span class="phase-current">built</span></span>
+        <span class="card-item">256×256 heightmap grid</span>
+        <span class="card-item">Procedural noise generation</span>
+        <span class="card-item">Water threshold fill</span>
+        <span class="card-item">Nutrient layer + flow</span>
+        <span class="card-item">Hillshading</span>
+        <span class="card-item">Shared buffer output</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Biology <span class="phase-planned">phase 2+</span></span>
+        <span class="card-item">Plant species + genomes</span>
+        <span class="card-item">Herbivore agents</span>
+        <span class="card-item">Carnivore agents</span>
+        <span class="card-item">Carcass decomposition</span>
+        <span class="card-item">Reproduction + mutation</span>
+        <span class="card-item">Arc field of view</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">World <span class="phase-planned">phase 2+</span></span>
+        <span class="card-item">Update loop</span>
+        <span class="card-item">Spatial grid index</span>
+        <span class="card-item">Shared buffer writes</span>
+        <span class="card-item">Generation tracking</span>
+        <span class="card-item">Event log</span>
+        <span class="card-item">Config intake</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── CONNECTOR ── -->
+  <div class="connector">
+    <div class="connector-line"></div>
+    <span class="connector-arrow">↓</span>
+    <span>shared buffer · zero copy · <span class="badge badge-zero">no allocation</span></span>
+    <span class="connector-arrow">↓</span>
+    <div class="connector-line"></div>
+  </div>
+
+  <!-- ── TYPESCRIPT ── -->
+  <div class="layer ts">
+    <div class="layer-label">Layer 2</div>
+    <div class="layer-title">
+      Coordinator
+      <span class="badge badge-main">Main Thread</span>
+    </div>
+    <div class="layer-subtitle">
+      TypeScript · Owns the game loop · Bridges simulation ↔ renderer · No simulation logic
+    </div>
+    <div class="layer-cards cols-3">
+
+      <div class="card">
+        <span class="card-title">Worker Bridge</span>
+        <span class="card-item">Start / pause / reset</span>
+        <span class="card-item">Config messages</span>
+        <span class="card-item">Buffer pointer management</span>
+        <span class="card-item">Memory growth handling</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Scenario <span class="phase-planned">planned</span></span>
+        <span class="card-item">Save / load state</span>
+        <span class="card-item">Initial conditions</span>
+        <span class="card-item">Shareable URL / JSON</span>
+        <span class="card-item">Preset terrain models</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Data Logger <span class="phase-planned">planned</span></span>
+        <span class="card-item">Population history</span>
+        <span class="card-item">Trait drift over time</span>
+        <span class="card-item">CSV / JSON export</span>
+        <span class="card-item">Hypothesis data capture</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── CONNECTOR ── -->
+  <div class="connector">
+    <div class="connector-line"></div>
+    <span class="connector-arrow">↓</span>
+    <span>render commands · UI events</span>
+    <span class="connector-arrow">↓</span>
+    <div class="connector-line"></div>
+  </div>
+
+  <!-- ── RENDERER ── -->
+  <div class="layer renderer">
+    <div class="layer-label">Layer 3</div>
+    <div class="layer-title">
+      Renderer
+      <span class="badge badge-main">Main Thread</span>
+    </div>
+    <div class="layer-subtitle">
+      Canvas 2D (→ WebGL when needed) · Reads shared buffer directly · Owns camera and viewport
+    </div>
+    <div class="layer-cards cols-3">
+
+      <div class="card">
+        <span class="card-title">World Canvas <span class="phase-current">phase 1</span></span>
+        <span class="card-item">Terrain colour map</span>
+        <span class="card-item">Hillshade overlay</span>
+        <span class="card-item">Nutrient overlay (F key)</span>
+        <span class="card-item">Agent dots + states</span>
+        <span class="card-item">Camera / scroll / zoom</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">UI Panel <span class="phase-planned">tabbed</span></span>
+        <span class="card-item">Stats · Inspector · Params</span>
+        <span class="card-item">Debug · Event log</span>
+        <span class="card-item">Population charts</span>
+        <span class="card-item">Genome trait bars</span>
+        <span class="card-item">Sliders + controls</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Zoom Overlay <span class="phase-planned">planned</span></span>
+        <span class="card-item">8–10× magnification</span>
+        <span class="card-item">Tracks selected agent</span>
+        <span class="card-item">Procedural morphology</span>
+        <span class="card-item">Eye placement visible</span>
+        <span class="card-item">Ambulation animation</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── CONNECTOR ── -->
+  <div class="connector">
+    <div class="connector-line"></div>
+    <span class="connector-arrow">↓</span>
+    <span>all constants · no magic numbers anywhere</span>
+    <span class="connector-arrow">↓</span>
+    <div class="connector-line"></div>
+  </div>
+
+  <!-- ── CONFIG / DATA ── -->
+  <div class="layer config">
+    <div class="layer-label">Layer 4</div>
+    <div class="layer-title">Config · Data</div>
+    <div class="layer-subtitle">
+      Single Config struct · All constants in one place · Passed at construction · Compiler enforces it
+    </div>
+    <div class="layer-cards cols-3">
+
+      <div class="card">
+        <span class="card-title">Config Struct <span class="phase-current">built</span></span>
+        <span class="card-item">World dimensions</span>
+        <span class="card-item">Terrain grid size</span>
+        <span class="card-item">All sim constants</span>
+        <span class="card-item">Feature toggles</span>
+        <span class="card-item">Slider min / max / default</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Scenario File <span class="phase-planned">planned</span></span>
+        <span class="card-item">JSON format</span>
+        <span class="card-item">Initial world state</span>
+        <span class="card-item">Reproducible seed</span>
+        <span class="card-item">Sharable / distributable</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Export <span class="phase-planned">planned</span></span>
+        <span class="card-item">Population → CSV</span>
+        <span class="card-item">Trait drift → CSV</span>
+        <span class="card-item">For external analysis</span>
+        <span class="card-item">Hypothesis data capture</span>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<!-- ── NOTES ── -->
+<div class="notes">
+
+  <div class="note-card">
+    <div class="note-title">Build phases</div>
+    <div class="note-item">
+      <b>Phase 1 — Terrain</b> · Heightmap, water, nutrients, hillshading<br>
+      <b>Phase 2 — Plants</b> · Single generalist species, terrain-responsive growth<br>
+      <b>Phase 3 — Herbivores</b> · Arc field of view, RPG cost system, home base<br>
+      <b>Phase 4 — Carnivores</b> · Predation, morphology differentiation<br>
+      <b>Phase 5 — Aquatic plants</b> · Nutrient runoff, shoreline ecology<br>
+      <b>Phase 6 — Speciation</b> · Reproductive isolation, lineage tracking
+    </div>
+  </div>
+
+  <div class="note-card">
+    <div class="note-title">Key design principles</div>
+    <div class="note-item">
+      <b>No magic numbers</b> · Every constant in Config struct<br>
+      <b>Clean separation</b> · Simulation knows nothing about rendering<br>
+      <b>Zero GC pressure</b> · Rust ownership model, shared buffers<br>
+      <b>Deterministic</b> · Same seed always produces the same world<br>
+      <b>Evolutionary costs</b> · Every advantage has a tradeoff<br>
+      <b>Arc field of view</b> · No animal has 360° vision
+    </div>
+  </div>
+
+  <div class="note-card">
+    <div class="note-title">Performance targets</div>
+    <div class="note-item">
+      <b>60 fps</b> · At 2000 agents on 4000×2000 world<br>
+      <b>Zero GC spikes</b> · Rust simulation core, shared buffers<br>
+      <b>O(n²) → O(n log n)</b> · Spatial grid index when needed<br>
+      <b>Arc scan</b> · ~50% reduction in effective scan area vs circle<br>
+      <b>Stress tested</b> · Rust/WASM vs TypeScript comparison complete
+    </div>
+  </div>
+
+  <div class="note-card">
+    <div class="note-title">Planned features (backlog)</div>
+    <div class="note-item">
+      <b>Day / night cycle</b> · Vision, photosynthesis, niche partitioning<br>
+      <b>Weather system</b> · Nutrient redistribution events<br>
+      <b>Volcanic activity</b> · Nutrient spikes, movement barriers<br>
+      <b>Fruit dispersal</b> · Animal-plant mutualism co-evolution<br>
+      <b>Sexual reproduction</b> · Crossover, genetic diversity<br>
+      <b>Terrain sculpting</b> · Interactive heightmap editing
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

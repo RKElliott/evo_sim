@@ -1,0 +1,24 @@
+[package]
+name        = "utils"
+version     = "0.1.0"
+edition     = "2021"
+description = "Shared utilities for evo_sim — deterministic RNG, spatial grid, tracer. No WASM dependencies, so it also builds under native cargo test."
+
+# Intentionally empty: keeping utils dependency-free is what lets it compile
+# under native `cargo test` as well as inside the WASM build of `sim`.
+[dependencies]
+
+[features]
+# Master COMPILE-TIME switch for the tracer. With this feature ABSENT, the
+# trace_scope!/trace_event! macros expand to nothing — there are no call sites,
+# so the tracer machinery is stripped from the release build by LTO (the
+# "zero cost in release" guarantee).
+#
+# WITHIN a build that enables this feature, the master on/off AND the
+# per-subsystem switches are controlled at RUNTIME — see tracer::set_enabled
+# and tracer::set_subsystem — so you toggle what you're watching from the UI
+# without rebuilding.
+#
+# Build traced:    wasm-pack build --target web --release -- --features trace
+# Test traced:     cargo test -p utils --features trace
+trace = []

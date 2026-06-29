@@ -1,0 +1,1806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evolution Simulator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: #0e1016;
+    color: #c8d0e0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+
+  /* ── Main layout ── */
+  #app {
+    display: flex;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  /* ── World canvas — fills all space above control bar ── */
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    cursor: grab;
+  }
+  #canvas-wrap.dragging { cursor: grabbing; }
+  #world {
+    position: absolute;
+    top: 0; left: 0;
+    image-rendering: pixelated;
+  }
+
+  /* ── HUD overlay — top-left corner of canvas ── */
+  #hud {
+    position: absolute;
+    top: 10px; left: 10px;
+    background: rgba(8, 12, 22, 0.92);
+    border: 0.5px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    line-height: 2.2;
+    pointer-events: none;
+    min-width: 160px;
+    backdrop-filter: blur(4px);
+  }
+  .hud-row { display: flex; justify-content: space-between; gap: 16px; }
+  .hud-label { color: #9ab8d8; font-size: 13px; }
+  .hud-value { color: #e8f4ff; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .hud-value.green  { color: #80f0a0; }
+  .hud-value.amber  { color: #f0c050; }
+
+  /* ── Pause overlay ── */
+  #pause-overlay {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10,12,20,0.80);
+    border: 0.5px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 14px 28px;
+    font-size: 15px;
+    color: #d0a040;
+    letter-spacing: 0.06em;
+    pointer-events: none;
+    display: none;
+  }
+
+  /* ── Control bar ── */
+  #ctrl {
+    flex-shrink: 0;
+    background: #12151e;
+    border-top: 0.5px solid #1e2430;
+    padding: 8px 14px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+  }
+
+  /* Button styles */
+  .btn {
+    padding: 5px 14px;
+    border-radius: 6px;
+    border: 0.5px solid #2a3448;
+    background: #1a1e2c;
+    color: #8898b8;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s;
+  }
+  .btn:hover { background: #222840; }
+  .btn.primary { background: #102038; border-color: #284878; color: #60a0d8; }
+  .btn.primary:hover { background: #182840; }
+  .btn.danger  { background: #201018; border-color: #482030; color: #c06878; }
+  .btn.danger:hover { background: #281820; }
+  .btn.active  { background: #102830; border-color: #208050; color: #50d080; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn:disabled:hover { background: #1a1e2c; }
+  .seed-input { width: 78px; background: #1a1e28; border: 1px solid #304050;
+                color: #a0c0e0; border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+
+  /* Divider */
+  .ctrl-sep {
+    width: 0.5px; height: 24px;
+    background: #1e2430; flex-shrink: 0;
+  }
+
+  /* Zoom display */
+  #zoom-display {
+    font-size: 12px; color: #506080;
+    font-variant-numeric: tabular-nums;
+    min-width: 44px; text-align: center;
+  }
+
+  /* Slider group */
+  .ctrl-group {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px;
+  }
+  .ctrl-group label { color: #4a6080; white-space: nowrap; }
+  .ctrl-group input[type=range] {
+    width: 80px; accent-color: #305878;
+  }
+  .ctrl-group span { color: #6888a8; min-width: 34px; font-size: 11px; }
+
+  /* Checkbox group */
+  .ctrl-check {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; color: #4a6080; cursor: pointer;
+  }
+  .ctrl-check input { accent-color: #50d080; cursor: pointer; }
+  .ctrl-check span { color: #50d080; }
+
+  /* Status line */
+  #status {
+    font-size: 11px; color: #304050;
+    width: 100%; order: 99;
+  }
+  /* ── Live trace panel — docked below canvas, shown only when Trace is on ── */
+  #trace-panel {
+    display: none;              /* flex when tracing is on */
+    flex-direction: column;
+    flex: 0 0 auto;
+    height: 200px;
+    border-top: 1px solid #2a3344;
+    background: #0b0d13;
+  }
+  #trace-panel.collapsed { height: auto; }
+  #trace-panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    flex: 0 0 auto;
+    padding: 4px 10px;
+    font-size: 11px; letter-spacing: 0.06em; color: #80a0c0;
+    background: #12161f; border-bottom: 1px solid #1e2633;
+  }
+  #trace-collapse {
+    background: none; border: none; color: #80a0c0; cursor: pointer;
+    font-size: 12px; line-height: 1; padding: 2px 6px;
+  }
+  #trace-collapse:hover { color: #c8d8e8; }
+  #trace-out {
+    flex: 1; overflow-y: auto; margin: 0;
+    padding: 6px 10px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px; line-height: 1.45;
+    color: #9fe0b0; white-space: pre;
+  }
+  #trace-panel.collapsed #trace-out { display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── World canvas ── -->
+  <div id="canvas-wrap">
+    <canvas id="world"></canvas>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="hud-row">
+        <span class="hud-label">Seed</span>
+        <span class="hud-value" id="h-seed">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Generation</span>
+        <span class="hud-value" id="h-gen">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Mature plants</span>
+        <span class="hud-value green" id="h-mature">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Seedlings</span>
+        <span class="hud-value green" id="h-seedling">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Seeds</span>
+        <span class="hud-value" id="h-seeds">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Nutrient range</span>
+        <span class="hud-value amber" id="h-nutr">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Herbivores</span>
+        <span class="hud-value" style="color:#50c8ff" id="h-herbs">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Carnivores</span>
+        <span class="hud-value" style="color:#ff6040" id="h-carns">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">FPS</span>
+        <span class="hud-value" id="h-fps">—</span>
+      </div>
+      <div style="height:0.5px;background:rgba(255,255,255,0.08);margin:4px 0"></div>
+      <div style="font-size:9px;color:#304860;letter-spacing:0.08em;
+                  text-transform:uppercase;margin-bottom:2px">Diagnostics</div>
+      <div class="hud-row">
+        <span class="hud-label">Eats/gen</span>
+        <span class="hud-value" id="h-eats" style="color:#b8f070">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Starvations/gen</span>
+        <span class="hud-value" id="h-starv" style="color:#ff8080">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Avg age at death</span>
+        <span class="hud-value" id="h-agedeath" style="color:#ffb870">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Plants locked</span>
+        <span class="hud-value" id="h-locked" style="color:#ffff70">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Avg herb energy</span>
+        <span class="hud-value" id="h-energy" style="color:#80e0ff">—</span>
+      </div>
+    </div>
+
+    <!-- Debug indicator -->
+    <div id="debug-indicator" style="
+      position:absolute; top:10px; right:10px;
+      font-size:11px; color:#60d080; font-weight:500;
+      letter-spacing:0.06em; pointer-events:none;
+      background:rgba(10,14,24,0.72); padding:4px 8px;
+      border-radius:4px; border:0.5px solid rgba(96,208,128,0.3);
+    "></div>
+
+    <!-- Population chart -->
+    <div id="chart-wrap" style="
+      position:absolute; bottom:10px; right:10px;
+      background:rgba(10,14,24,0.88);
+      border:0.5px solid rgba(255,255,255,0.08);
+      border-radius:8px; padding:8px;
+      backdrop-filter:blur(4px);
+    ">
+      <div style="font-size:10px;color:#4a6080;letter-spacing:0.08em;
+                  text-transform:uppercase;margin-bottom:4px;
+                  display:flex;justify-content:space-between;align-items:center">
+        <span>Population</span>
+        <button onclick="exportChart()" style="
+          font-size:9px;padding:2px 7px;border-radius:4px;
+          background:#182030;border:0.5px solid #2a3448;
+          color:#6888a8;cursor:pointer;margin-left:4px">
+          PNG
+        </button>
+        <button onclick="exportCSV()" style="
+          font-size:9px;padding:2px 7px;border-radius:4px;
+          background:#182030;border:0.5px solid #2a3448;
+          color:#6888a8;cursor:pointer;margin-left:4px">
+          CSV
+        </button>
+      </div>
+      <canvas id="popchart" width="280" height="100"
+              style="display:block;border-radius:4px;background:#0e1016"></canvas>
+      <div style="font-size:10px;color:#304050;margin-top:4px;display:flex;gap:12px">
+        <span><span style="color:#90d858">■</span> Plants</span>
+        <span><span style="color:#50c8ff">■</span> Herbivores</span>
+        <span><span style="color:#ff6040">■</span> Carnivores</span>
+      </div>
+    </div>
+
+    <!-- Pause overlay -->
+    <!-- Inspector Panel -->
+<div id="inspector" style="
+  display:none; position:absolute; top:10px; right:10px;
+  background:rgba(8,12,22,0.94); border:1px solid #304050;
+  border-radius:6px; padding:12px; min-width:220px; max-width:260px;
+  font-family:monospace; font-size:12px; color:#c0d0e0;
+  pointer-events:none; z-index:100;">
+  <div id="inspector-title" style="font-size:13px;color:#e0f0ff;font-weight:bold;margin-bottom:8px"></div>
+  <div id="inspector-terrain" style="color:#8090a0;font-size:11px;margin-bottom:8px"></div>
+  <div id="inspector-traits"></div>
+  <div style="font-size:10px;color:#506070;margin-top:8px">Click elsewhere to close</div>
+</div>
+
+<div id="pause-overlay">⏸  PAUSED  —  SPACE to resume</div>
+  </div>
+
+  <!-- ── Live trace panel (shown when Trace is on) ── -->
+  <div id="trace-panel">
+    <div id="trace-panel-head">
+      <span>📋 Trace</span>
+      <button id="trace-collapse" onclick="toggleTracePanel()"
+              title="Collapse / expand the trace panel">▾</button>
+    </div>
+    <pre id="trace-out"></pre>
+  </div>
+
+  <!-- ── Control bar ── -->
+  <div id="ctrl">
+
+    <!-- Playback -->
+    <button class="btn primary" id="btn-pause" onclick="togglePause()">⏸ Pause</button>
+    <button class="btn" id="btn-step" onclick="stepOnce()" disabled
+            title="Advance one tick (. key) — available while paused">⏭ Step</button>
+    <button class="btn danger"  onclick="restartCurrentSeed()"
+            title="Restart the current seed (r) — same terrain, fresh population">↺ Restart</button>
+
+    <div class="ctrl-sep"></div>
+
+    <!-- Zoom -->
+    <button class="btn" onclick="zoomStep(-1)">−</button>
+    <span id="zoom-display">1.0×</span>
+    <button class="btn" onclick="zoomStep(1)">+</button>
+    <button class="btn" onclick="resetCamera()">Fit</button>
+
+    <div class="ctrl-sep"></div>
+
+    <div class="ctrl-group">
+      <label>Sim speed</label>
+      <input type="range" id="sld-simspeed" min="1" max="32" step="1" value="1"
+             oninput="setSimSpeed(this.value)">
+      <span id="lbl-simspeed">1×</span>
+    </div>
+
+    <div class="ctrl-sep"></div>
+
+    <!-- World seeds & presets -->
+    <button class="btn" onclick="regenerate()">New terrain</button>
+    <input type="number" id="inp-seed" class="seed-input" min="0" step="1"
+           placeholder="seed #" title="Type a seed, then Load (or Enter)"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();loadSeedFromInput();}">
+    <button class="btn" onclick="loadSeedFromInput()">Load</button>
+    <button class="btn" style="background:#102818;border-color:#204830;color:#60d080"
+            onclick="loadMainWorld()">🌍 Main World</button>
+    <button class="btn" style="background:#102818;border-color:#204830;color:#60d080"
+            onclick="loadDevWorld()">🔬 Dev World</button>
+    <label class="ctrl-check">
+      <input type="checkbox" id="chk-trace"
+             onchange="toggleTrace(this.checked)">
+      📋 Trace <span id="lbl-trace">OFF</span>
+    </label>
+    <button class="btn" style="background:#181028;border-color:#382048;color:#a060d0"
+            onclick="exportTrace()">↓ Trace</button>
+    <div class="ctrl-group">
+      <label>Focus id</label>
+      <input type="number" id="inp-trace-focus" min="0" step="1" placeholder="0=all"
+             style="width:62px" oninput="setTraceFocus(this.value)">
+    </div>
+    <div class="ctrl-group">
+      <label>Tag id</label>
+      <input type="number" id="inp-trace-tag" min="0" step="1" placeholder="0=off"
+             style="width:62px" oninput="setTraceTag()">
+      <select id="sel-trace-kind" onchange="setTraceTag()" style="margin-left:3px">
+        <option value="1" selected>Carn</option>
+        <option value="2">Herb</option>
+        <option value="0">Any</option>
+      </select>
+    </div>
+    <button class="btn" style="background:#102818;border-color:#204830;color:#60d080"
+            onclick="exportAgentCsv()">↓ Agent CSV</button>
+    <div class="ctrl-group">
+      <label>m/unit</label>
+      <input type="number" id="inp-scale-m" min="0" step="any" value="1"
+             style="width:62px" oninput="setScaleMeters(this.value)">
+    </div>
+    <div class="ctrl-group">
+      <label>s/tick</label>
+      <input type="number" id="inp-scale-s" min="0" step="any" value="1"
+             style="width:62px" oninput="setScaleSecs(this.value)">
+    </div>
+
+    <div class="ctrl-sep"></div>
+
+    <!-- Terrain sliders -->
+    <div class="ctrl-group">
+      <label>Water</label>
+      <input type="range" min="0.1" max="0.7" step="0.01" value="0.35"
+             id="sld-water" oninput="setWater(this.value)">
+      <span id="lbl-water">0.35</span>
+    </div>
+    <div class="ctrl-group">
+      <label>Hillshade</label>
+      <input type="range" min="0" max="1" step="0.05" value="0.4"
+             id="sld-hs" oninput="setHillshade(this.value)">
+      <span id="lbl-hs">0.40</span>
+    </div>
+    <div class="ctrl-group">
+      <label>Nut. flow</label>
+      <input type="range" min="0" max="0.02" step="0.0005" value="0.002"
+             id="sld-flow" oninput="setFlow(this.value)">
+      <span id="lbl-flow">0.002</span>
+    </div>
+    <div class="ctrl-group">
+      <label>Nut. overlay</label>
+      <input type="range" min="0" max="1" step="0.05" value="0"
+             oninput="setNutrientOpacity(this.value)">
+      <span id="lbl-nop">0.00</span>
+    </div>
+
+    <div class="ctrl-sep"></div>
+
+    <!-- Plant sliders -->
+    <div class="ctrl-group">
+      <label>Seed chance</label>
+      <input type="range" min="0.05" max="1" step="0.05" value="0.4"
+             id="sld-seed" oninput="setSeedChance(this.value)">
+      <span id="lbl-seed">0.40</span>
+    </div>
+    <div class="ctrl-group">
+      <label>Mut. rate</label>
+      <input type="range" min="0" max="0.3" step="0.01" value="0.06"
+             id="sld-pmut" oninput="setPlantMutation(this.value)">
+      <span id="lbl-pmut">0.06</span>
+    </div>
+    <label class="ctrl-check">
+      <input type="checkbox" id="chk-evolve" checked
+             onchange="setPlantsEvolve(this.checked)">
+      Evolve <span id="lbl-evolve">ON</span>
+    </label>
+
+    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+      <span style="font-size:11px;color:#8090a0">Organisms:</span>
+      <label style="font-size:11px;color:#50c8ff;display:flex;align-items:center;gap:3px">
+        <input type="checkbox" id="chk-herbs" checked onchange="setHerbsEnabled(this.checked)">
+        Herbs
+      </label>
+      <label style="font-size:11px;color:#ff6040;display:flex;align-items:center;gap:3px">
+        <input type="checkbox" id="chk-carns" checked onchange="setCarnsEnabled(this.checked)">
+        Carns
+      </label>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:5px">
+      <span style="font-size:11px;color:#8090a0">Genome:</span>
+      <select id="genome-trait-select" onchange="setGenomeView(this.value)"
+        style="font-size:11px;padding:2px 4px;background:#1a1e28;border:1px solid #304050;color:#a0c0e0;border-radius:3px">
+        <option value="none">Off</option>
+        <option value="0">Drought Tol.</option>
+        <option value="1">Flood Tol.</option>
+        <option value="2">Nutrient Eff.</option>
+        <option value="3">Growth Rate</option>
+        <option value="4">Seed Count</option>
+        <option value="5">Seed Spread</option>
+        <option value="6">Size</option>
+        <option value="7">Shade Tol.</option>
+      </select>
+    </div>
+
+    <!-- Status -->
+    <div id="status">Loading WASM...</div>
+  </div>
+</div>
+
+<script type="module">
+// ---------------------------------------------------------------------------
+// Camera state
+// ---------------------------------------------------------------------------
+let camX = 0, camY = 0, camZ = 1.0;
+const MIN_ZOOM = 0.5, MAX_ZOOM = 20.0;
+
+// ---------------------------------------------------------------------------
+// Scale interpretation (DISPLAY ONLY — never touches the sim). L = metres per
+// world-unit, T = seconds per tick. The simulation is scale-free; these only
+// label it for the readout + scale bar.
+// ---------------------------------------------------------------------------
+let scaleMetersPerUnit  = 1.0;
+let scaleSecondsPerTick = 1.0;
+let traceFocus          = 0;    // per-agent trace focus id (0 = all agents)
+let traceTag            = 0;    // per-agent CSV log tag (0 = off)
+let traceTagKind        = 1;    // 0=Any (herb-first), 1=Carn, 2=Herb
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let worker       = null;
+let workerReady  = false;
+let paused       = false;
+let running      = false;
+let animId       = null;
+let lastTime     = 0;
+let fpsFilter    = 0;
+let frameCount   = 0;
+let debugMode    = false;
+let nutrientOpacity = 0;
+let simSpeed     = 1;
+let birthFlashes = [];
+
+// World dimensions — updated from worker messages
+let worldW = 4000, worldH = 2000;
+let terrainCols = 256, terrainRows = 256;
+
+// Latest stats from worker
+let stats = {};
+
+// Render buffers — received from worker each frame, returned after render
+let terrainView  = null;
+let plantView    = null;
+let herbView     = null;
+let carnView     = null;
+let herbIdView   = null;
+let carnIdView   = null;
+let tLen = 0, pLen = 0, hLen = 0, cLen = 0;
+let pendingFrame = false;  // true while main thread holds buffers
+
+// Terrain image cache
+let terrainCanvas = null;
+let terrainDirty  = true;
+
+// Population history for chart
+let popHistory = [];
+
+// ---------------------------------------------------------------------------
+// Canvas
+// ---------------------------------------------------------------------------
+const wrap   = document.getElementById('canvas-wrap');
+const canvas = document.getElementById('world');
+const ctx    = canvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width  = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  terrainDirty  = true;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// ---------------------------------------------------------------------------
+// Worker setup
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Inspector — click on any agent to see its genome
+// ---------------------------------------------------------------------------
+
+function handleInspectorClick(e) {
+  const rect = canvas.getBoundingClientRect();
+  const px   = e.clientX - rect.left;
+  const py   = e.clientY - rect.top;
+  const wx   = px / camZ + camX;
+  const wy   = py / camZ + camY;
+  const found = findNearestAgent(wx, wy);
+  if (found) showInspector(found, px, py);
+  else document.getElementById('inspector').style.display = 'none';
+}
+
+function findNearestAgent(wx, wy) {
+  const PICK_R2 = (20 / camZ) * (20 / camZ);
+  let best = null, bestD = PICK_R2;
+
+  if (plantView) {
+    const n = stats.nPlantsActive || 0;
+    for (let i = 0; i < n; i++) {
+      const base = i * PLANT_STRIDE;
+      const dx = plantView[base] - wx, dy = plantView[base+1] - wy;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bestD) { bestD = d2; best = { type:'plant', idx:i }; }
+    }
+  }
+  if (herbView && herbsEnabled) {
+    const n = stats.nHerbsActive || 0;
+    for (let i = 0; i < n; i++) {
+      const dx = herbView[i*7] - wx, dy = herbView[i*7+1] - wy;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bestD) { bestD = d2; best = { type:'herb', idx:i }; }
+    }
+  }
+  if (carnView && carnsEnabled) {
+    const n = stats.nCarnsActive || 0;
+    for (let i = 0; i < n; i++) {
+      const dx = carnView[i*6] - wx, dy = carnView[i*6+1] - wy;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bestD) { bestD = d2; best = { type:'carn', idx:i }; }
+    }
+  }
+  return best;
+}
+
+function showInspector(agent, px, py) {
+  const panel    = document.getElementById('inspector');
+  const titleEl  = document.getElementById('inspector-title');
+  const traitsEl = document.getElementById('inspector-traits');
+  let title = '', traitsHtml = '';
+  inspectReq = null;   // cleared; herb/carn branches set it + request async genome
+
+  if (agent.type === 'plant') {
+    const i    = agent.idx;
+    const base = i * PLANT_STRIDE;
+    const stg  = Math.round(plantView[base+2]);
+    const stages = ['Seed','Seedling','Mature','Dead'];
+    title = `🌿 Plant #${i} — ${stages[stg]||'?'}`;
+    traitsHtml = TRAIT_NAMES.map((name, t) => {
+      const v   = plantView[base + 5 + t];
+      const pct = Math.min(100, Math.round((v / 1.5) * 100));
+      const col = traitColor(Math.min(1, v / 1.5));
+      return `<div style="margin:3px 0">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:#8090a0;font-size:10px">${name}</span>
+          <span style="color:#c0d0e0;font-size:10px">${v.toFixed(3)}</span>
+        </div>
+        <div style="background:#1a2030;border-radius:2px;height:5px">
+          <div style="background:${col};height:5px;width:${pct}%;border-radius:2px"></div>
+        </div></div>`;
+    }).join('');
+
+  } else if (agent.type === 'herb') {
+    const STATE_NAMES = ['Wandering','Eating','Foraging','Sated','Following','Homing','Alarmed','Resting','Fleeing'];
+    const state = Math.round(herbView[agent.idx*7+2]);
+    const hid   = herbIdView ? Math.round(herbIdView[agent.idx]) : agent.idx;
+    title = `🐾 Herb #${hid} — ${STATE_NAMES[state]||'?'}`;
+    traitsHtml = '<div style="color:#8090a0;font-size:11px;padding:4px">loading genome…</div>';
+    inspectReq = { kind: 2, id: hid };
+    worker.postMessage({ type:'inspect', kind: 2, id: hid });
+
+  } else if (agent.type === 'carn') {
+    const CARN_STATES = ['Wandering','Stalking','Chasing','Latched','Resting','Homing'];
+    const state = Math.round(carnView[agent.idx*6+2]);
+    const cid   = carnIdView ? Math.round(carnIdView[agent.idx]) : agent.idx;
+    title = `🦁 Carnivore #${cid} — ${CARN_STATES[state]||'?'}`;
+    traitsHtml = '<div style="color:#8090a0;font-size:11px;padding:4px">loading genome…</div>';
+    inspectReq = { kind: 1, id: cid };
+    worker.postMessage({ type:'inspect', kind: 1, id: cid });
+  }
+
+  titleEl.textContent = title;
+  traitsEl.innerHTML  = traitsHtml;
+
+  // Keep panel on screen
+  const iw = 260, ih = 320;
+  let left = px + 14, top = py + 14;
+  if (left + iw > canvas.width)  left = px - iw - 4;
+  if (top  + ih > canvas.height) top  = Math.max(4, py - ih);
+  panel.style.left    = left + 'px';
+  panel.style.top     = top  + 'px';
+  panel.style.display = 'block';
+}
+
+// ---------------------------------------------------------------------------
+// Genome inspector renderer — fills the inspector for a herb/carn from the
+// async inspect() payload: budget radar (raw genome) + phenotype bars (derived).
+// ---------------------------------------------------------------------------
+let inspectReq = null;  // {kind,id} of the organism whose genome we're awaiting
+
+function fmtNum(v, unit) {
+  if (unit === 't')          return Math.round(v).toString();
+  if (Math.abs(v) >= 100)    return Math.round(v).toString();
+  if (Math.abs(v) >= 10)     return v.toFixed(1);
+  return v.toFixed(2);
+}
+
+const TRAIT_SHORT = {
+  speed:'Speed', size:'Size', sight_range:'Sight', eye_placement:'Eyes',
+  efficiency:'Effic', reproduction_rate:'Repro', vigilance:'Vigil', herd_affinity:'Herd',
+  stealth:'Stealth', strike_power:'Strike', stamina:'Stamina'
+};
+function traitShort(n) {
+  return TRAIT_SHORT[n] || (n ? n.charAt(0).toUpperCase() + n.slice(1, 6) : '');
+}
+
+function renderGenomePanel(d) {
+  const tr = d.traits || [], ph = d.phenotypes || [];
+  const n  = tr.length || 8;
+  const budget = d.budget || 3.0;
+  const def  = budget / n;
+  const maxV = def * 2.2;             // a trait at 2.2× the even split hits the rim
+  const cx = 110, cy = 90, R = 64;
+  const pt = (i, r) => {
+    const a = (-90 + i * (360 / n)) * Math.PI / 180;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  };
+
+  let grid = '';
+  [0.5, 1.0].forEach(f => {
+    let p = [];
+    for (let i = 0; i < n; i++) { const q = pt(i, R * f); p.push(q[0].toFixed(1) + ',' + q[1].toFixed(1)); }
+    grid += `<polygon points="${p.join(' ')}" fill="none" stroke="#2a3648" stroke-width="1"/>`;
+  });
+  for (let i = 0; i < n; i++) {
+    const e = pt(i, R);
+    grid += `<line x1="${cx}" y1="${cy}" x2="${e[0].toFixed(1)}" y2="${e[1].toFixed(1)}" stroke="#2a3648" stroke-width="1"/>`;
+  }
+
+  let refP = [], orgP = [], labels = '';
+  for (let i = 0; i < n; i++) {
+    const r = pt(i, R * Math.min(def / maxV, 1));
+    refP.push(r[0].toFixed(1) + ',' + r[1].toFixed(1));
+    const ov = Math.min((tr[i] ? tr[i].value : 0) / maxV, 1.08);
+    const o  = pt(i, R * ov);
+    orgP.push(o[0].toFixed(1) + ',' + o[1].toFixed(1));
+    const l = pt(i, R + 13);
+    const anc = Math.abs(l[0] - cx) < 6 ? 'middle' : (l[0] > cx ? 'start' : 'end');
+    labels += `<text x="${l[0].toFixed(1)}" y="${(l[1] + 3).toFixed(1)}" text-anchor="${anc}" font-size="8.5" fill="#90a0b4">${traitShort(tr[i] ? tr[i].name : '')}</text>`;
+  }
+
+  const svg = `<svg viewBox="0 0 220 184" width="100%" style="display:block;margin:2px 0 4px">
+    ${grid}
+    <polygon points="${refP.join(' ')}" fill="none" stroke="#5a6a7a" stroke-width="1" stroke-dasharray="3 2"/>
+    <polygon points="${orgP.join(' ')}" fill="#3987e5" fill-opacity="0.22" stroke="#3987e5" stroke-width="1.6"/>
+    ${labels}
+  </svg>`;
+
+  let bars = '';
+  ph.forEach(p => {
+    const span = (p.hi - p.lo) || 1;
+    let frac = (p.value - p.lo) / span;
+    const over = frac > 1.001;
+    frac = Math.max(0.02, Math.min(1, frac));
+    const col = over ? '#e0a040' : '#3987e5';
+    const unitTxt = (p.unit === 'x') ? '×' : (p.unit ? ' ' + p.unit : '');
+    bars += `<div style="margin:4px 0">
+      <div style="display:flex;justify-content:space-between">
+        <span style="color:#8090a0;font-size:10px">${p.name}</span>
+        <span style="color:#c0d0e0;font-size:10px">${fmtNum(p.value, p.unit)}${unitTxt}${over ? ' ⚠' : ''}</span>
+      </div>
+      <div style="background:#1a2030;border-radius:2px;height:5px;margin-top:2px;overflow:hidden">
+        <div style="background:${col};height:5px;width:${Math.round(frac * 100)}%"></div>
+      </div></div>`;
+  });
+
+  const hdr  = `<div style="color:#8090a0;font-size:10px;margin-bottom:1px">budget ${budget.toFixed(1)} · ${d.state || ''} · E ${d.energy != null ? d.energy.toFixed(1) : '?'} · age ${d.age != null ? d.age : '?'}</div>`;
+  const cap1 = `<div style="color:#6a7a8a;font-size:9.5px;margin:0 0 1px">genome — dashed ring = even split</div>`;
+  const cap2 = `<div style="color:#6a7a8a;font-size:9.5px;margin:5px 0 2px">phenotype — ⚠ = past normal range</div>`;
+  return hdr + cap1 + svg + cap2 + bars;
+}
+
+// Genome trait legend
+function drawGenomeLegend() {
+  const ti        = parseInt(genomeViewTrait);
+  const traitName = TRAIT_NAMES[ti] || '';
+
+  const lw = 160, lh = 28, lx = 10, ly = canvas.height - 80;
+
+  // Background
+  ctx.fillStyle = 'rgba(8,12,22,0.85)';
+  ctx.fillRect(lx, ly, lw, lh + 20);
+  ctx.strokeStyle = '#304050';
+  ctx.lineWidth   = 1;
+  ctx.strokeRect(lx, ly, lw, lh + 20);
+
+  // Title
+  ctx.fillStyle = '#c0d0e0';
+  ctx.font      = '11px monospace';
+  ctx.fillText(traitName, lx + 6, ly + 14);
+
+  // Gradient bar
+  const gx = lx + 6, gy = ly + 18, gw = lw - 12, gh = 8;
+  for (let i = 0; i < gw; i++) {
+    ctx.fillStyle = traitColor(i / gw);
+    ctx.fillRect(gx + i, gy, 1, gh);
+  }
+
+  // Labels
+  ctx.fillStyle = '#8090a0';
+  ctx.font      = '9px monospace';
+  ctx.fillText('Low', gx, gy + gh + 10);
+  ctx.textAlign = 'center';
+  ctx.fillText('Mid', gx + gw/2, gy + gh + 10);
+  ctx.textAlign = 'right';
+  ctx.fillText('High', gx + gw, gy + gh + 10);
+  ctx.textAlign = 'left';
+}
+
+function startWorker() {
+  try {
+    worker = new Worker('./worker.js', { type: 'module' });
+    worker.onmessage = handleWorkerMessage;
+    worker.onerror   = (e) => {
+      document.getElementById('status').textContent =
+        'Worker error — is WASM built? Check console.';
+      console.error('Worker error:', e);
+    };
+  } catch(e) {
+    document.getElementById('status').textContent =
+      'Failed to start worker — check console';
+    console.error(e);
+  }
+}
+
+function handleWorkerMessage(e) {
+  const msg = e.data;
+  switch (msg.type) {
+
+    case 'ready':
+      worldW      = msg.worldW;
+      worldH      = msg.worldH;
+      terrainCols = msg.terrainCols;
+      terrainRows = msg.terrainRows;
+      workerReady = true;
+      running     = true;
+      applyConfigSnapshot(msg.config);
+      resetCamera();
+      requestAnimationFrame(loop);
+      document.getElementById('status').textContent =
+        'SPACE pause · . step · R restart · scroll zoom · drag pan · D debug · F nutrients';
+      break;
+
+    case 'error':
+      // Worker caught a startup failure (e.g. WASM init / missing export from
+      // stale cache). Surface it loudly instead of dying to a black canvas.
+      running = false;
+      document.getElementById('status').textContent =
+        'Worker error: ' + (msg.message || 'unknown') + ' — check console';
+      console.error('Worker startup error:', msg.message);
+      break;
+
+    case 'frame':
+      stats       = msg.stats;
+      worldW      = msg.stats.worldW;
+      worldH      = msg.stats.worldH;
+      terrainCols = msg.stats.terrainCols;
+      terrainRows = msg.stats.terrainRows;
+
+      // Simple copy — no ownership tracking needed
+      terrainView = msg.terrainData;
+      plantView   = msg.plantData;
+      herbView    = msg.herbData;
+      carnView    = msg.carnData;
+      herbIdView  = msg.herbIdData;
+      carnIdView  = msg.carnIdData;
+      tLen        = msg.tLen;
+      pLen        = msg.pLen;
+      hLen        = msg.hLen;
+      cLen        = msg.cLen || 0;
+
+      // Build terrain cache when dirty
+      if (terrainDirty || !terrainCanvas) {
+        buildTerrainCache();
+        terrainDirty = false;
+      }
+
+      // Track births
+      const prevHerbs = (popHistory.length > 0) ? popHistory[popHistory.length-1][2] : 0;
+      if (stats.nHerbs > prevHerbs && herbView && hLen >= 7) {
+        const nH = Math.min(stats.nHerbsActive, Math.floor(hLen / 7));
+        if (nH > 0) {
+          birthFlashes.push({ x: herbView[(nH-1)*7], y: herbView[(nH-1)*7+1], age: 0 });
+        }
+      }
+
+      // Record pop history
+      if (stats.frame % 30 === 0) {
+        popHistory.push([stats.frame, stats.nPlantsMature, stats.nHerbs, stats.nCarns || 0]);
+        if (popHistory.length > 4000) popHistory.shift();
+      }
+
+      // Live trace panel (msg.traceText is null unless tracing is on)
+      if (msg.traceText != null) updateTracePanel(msg.traceText);
+      break;
+
+        case 'reset_done': {
+      // Preserve zoom + pan across same-size world loads (Restart, New terrain,
+      // Seed). Re-fit only when the world size actually changes (Dev <-> Main).
+      // Note: page reload goes through 'ready', which always re-fits — so a
+      // fresh page always starts at the standard "ground" state.
+      const sameSize = (msg.worldW === worldW && msg.worldH === worldH);
+      worldW      = msg.worldW;
+      worldH      = msg.worldH;
+      terrainCols = msg.terrainCols;
+      terrainRows = msg.terrainRows;
+      terrainCanvas = null;
+      terrainDirty  = true;
+      popHistory    = [];
+      applyConfigSnapshot(msg.config);
+      if (!sameSize) resetCamera();
+      break;
+    }
+
+    case 'terrain_changed':
+      terrainDirty = true;
+      break;
+
+    case 'trace_data':
+      downloadFile(msg.data,
+        `evo_sim_trace_gen${msg.gen}_f${msg.frame}.txt`, 'text/plain');
+      break;
+
+    case 'csv_data':
+      downloadFile(msg.data,
+        `evo_sim_diag_gen${msg.gen}.csv`, 'text/csv');
+      break;
+
+    case 'agent_csv_data': {
+      const kindLabel = traceTagKind === 1 ? 'carn'
+                      : traceTagKind === 2 ? 'herb' : 'agent';
+      downloadFile(msg.data,
+        `evo_sim_${kindLabel}${traceTag||'0'}_gen${msg.gen}_f${msg.frame}.csv`, 'text/csv');
+      break;
+    }
+
+    case 'inspect_data': {
+      if (!inspectReq || msg.kind !== inspectReq.kind || Number(msg.id) !== inspectReq.id) break;
+      const el = document.getElementById('inspector-traits');
+      try {
+        const d = JSON.parse(msg.data);
+        el.innerHTML = d.error
+          ? `<div style="color:#a08060;font-size:11px;padding:4px">${d.error}</div>`
+          : renderGenomePanel(d);
+      } catch (err) {
+        el.innerHTML = '<div style="color:#a06060;font-size:11px;padding:4px">inspect parse error</div>';
+      }
+      break;
+    }
+
+    case 'pop_history':
+      drawPopChartFromHistory(msg.data, msg.len, msg.gen);
+      break;
+  }
+}
+
+function downloadFile(data, filename, mime) {
+  const blob = new Blob([data], { type: mime });
+  const a    = document.createElement('a');
+  a.download = filename;
+  a.href     = URL.createObjectURL(blob);
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---------------------------------------------------------------------------
+// Camera
+// ---------------------------------------------------------------------------
+function resetCamera() {
+  camX = 0; camY = 0;
+  const scaleX = canvas.width  / worldW;
+  const scaleY = canvas.height / worldH;
+  camZ = Math.min(scaleX, scaleY);
+}
+
+function wtc(wx, wy) {
+  return [(wx - camX) * camZ, (wy - camY) * camZ];
+}
+
+function zoomStep(dir) {
+  const steps = [0.5,0.75,1,1.5,2,3,4,6,8,12,16,20];
+  let idx = steps.findIndex(s => s >= camZ) + dir;
+  idx = Math.max(0, Math.min(steps.length-1, idx));
+  const cx = canvas.width/2, cy = canvas.height/2;
+  const wx = cx/camZ + camX, wy = cy/camZ + camY;
+  camZ = steps[idx];
+  camX = wx - cx/camZ;
+  camY = wy - cy/camZ;
+  document.getElementById('zoom-display').textContent = camZ.toFixed(1) + '×';
+  terrainDirty = true;
+}
+
+// ---------------------------------------------------------------------------
+// Main render loop — runs on main thread at 60fps
+// ---------------------------------------------------------------------------
+function loop(ts) {
+  const dt = ts - lastTime;
+  lastTime = ts;
+  if (dt > 0) fpsFilter = fpsFilter * 0.9 + (1000/dt) * 0.1;
+  frameCount++;
+
+  draw();
+  if (frameCount % 20 === 0) updateHUD();
+  if (frameCount % 60 === 0) drawPopChart();
+
+  if (running) animId = requestAnimationFrame(loop);
+}
+
+// ---------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------
+function draw() {
+  const cw = canvas.width, ch = canvas.height;
+  ctx.fillStyle = '#0e1016';
+  ctx.fillRect(0, 0, cw, ch);
+
+  if (!workerReady) return;
+
+  // Build terrain cache when we have valid terrain data
+  if ((terrainDirty || !terrainCanvas) && terrainView && terrainView.buffer.byteLength > 0) {
+    buildTerrainCache();
+    terrainDirty = false;
+  }
+
+  // Always draw terrain cache if available (persists between frames)
+  if (terrainCanvas) {
+    const tw = worldW * camZ, th = worldH * camZ;
+    const tx = -camX * camZ, ty = -camY * camZ;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(terrainCanvas, tx, ty, tw, th);
+    // Dim terrain when genome view is active so plant colors stand out
+    if (genomeViewTrait !== 'none') {
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  if (plantView) drawPlants();
+  if (herbView  && herbsEnabled) drawHerbs();
+  if (carnView  && carnsEnabled) drawCarns();
+  if (genomeViewTrait !== 'none') drawGenomeLegend();
+  drawBirthFlashes();
+  if (debugMode && herbView && herbsEnabled) drawDebugOverlay();
+  drawScaleBar();
+}
+
+// Map-style scale bar (resizes with zoom) + zoom-invariant world facts.
+// Pure display: reads camZ (px per world-unit) and the L/T interpretation.
+function niceDistance(m) {
+  const pow = Math.pow(10, Math.floor(Math.log10(m)));
+  const f = m / pow;
+  const nice = f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10;
+  return nice * pow;
+}
+function fmtDistance(m) {
+  if (m >= 1000)  return (m / 1000).toLocaleString() + ' km';
+  if (m >= 1)     return m.toLocaleString() + ' m';
+  if (m >= 0.01)  return (m * 100).toPrecision(3) + ' cm';
+  return (m * 1000).toPrecision(3) + ' mm';
+}
+function drawScaleBar() {
+  if (!workerReady || !(camZ > 0)) return;
+  const mPerPx = scaleMetersPerUnit / camZ;   // metres per screen pixel
+  const niceM  = niceDistance(120 * mPerPx);  // aim ~120px, snap to 1/2/5
+  const barPx  = niceM / mPerPx;
+  const x = 14;                          // left margin (pop-chart overlay sits bottom-RIGHT)
+  const y = canvas.height - 46;          // raised, clear of the bottom hint strip
+  const wkm = (worldW * scaleMetersPerUnit) / 1000;
+  const hkm = (worldH * scaleMetersPerUnit) / 1000;
+  const facts = `world ≈ ${wkm.toFixed(2)}×${hkm.toFixed(2)} km · 1u=${scaleMetersPerUnit}m · 1t=${scaleSecondsPerTick}s`;
+  ctx.save();
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'left';
+  const boxW = Math.max(barPx, ctx.measureText(facts).width) + 14;
+  ctx.fillStyle = 'rgba(10,14,22,0.6)';
+  ctx.fillRect(x - 6, y - 22, boxW, 38);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#d0dcea';
+  ctx.beginPath();
+  ctx.moveTo(x, y - 5); ctx.lineTo(x, y);
+  ctx.lineTo(x + barPx, y); ctx.lineTo(x + barPx, y - 5);
+  ctx.stroke();
+  ctx.fillStyle = '#d0dcea';
+  ctx.fillText(fmtDistance(niceM), x, y - 8);
+  ctx.fillStyle = '#90a0b4';
+  ctx.fillText(facts, x, y + 12);
+  ctx.restore();
+}
+
+function buildTerrainCache() {
+  if (!terrainView) return;
+  if (!terrainCanvas) {
+    terrainCanvas = document.createElement('canvas');
+    terrainCanvas.width  = terrainCols;
+    terrainCanvas.height = terrainRows;
+  }
+  const tc  = terrainCanvas.getContext('2d');
+  const img = tc.createImageData(terrainCols, terrainRows);
+  const d   = img.data;
+  for (let i = 0; i < terrainCols * terrainRows; i++) {
+    const elev  = terrainView[i*4];
+    const nutr  = terrainView[i*4+1];
+    const water = terrainView[i*4+2];
+    const hs    = terrainView[i*4+3];
+    const [r,g,b] = elevToRgb(elev, water, hs, nutr, nutrientOpacity);
+    d[i*4]=r; d[i*4+1]=g; d[i*4+2]=b; d[i*4+3]=255;
+  }
+  tc.putImageData(img, 0, 0);
+}
+
+const PLANT_COLOURS = ['#505828','#688040','#90d858','#303820'];
+
+const PLANT_STRIDE = 13;  // [x,y,stage,radius,consumed, t0..t7]
+const TRAIT_NAMES  = [
+  'Drought Tolerance', 'Flood Tolerance', 'Nutrient Efficiency',
+  'Growth Rate', 'Seed Count', 'Seed Spread', 'Size', 'Shade Tolerance'
+];
+
+function drawPlants() {
+  if (!plantView || !stats.nPlantsActive) return;
+  const n          = stats.nPlantsActive;
+  const pxPerWorld = camZ / (worldW / terrainCols);
+  const showGenome = genomeViewTrait !== 'none';
+  const traitIdx   = showGenome ? parseInt(genomeViewTrait) : -1;
+
+  for (let i = 0; i < n; i++) {
+    const base = i * PLANT_STRIDE;
+    const wx   = plantView[base],   wy  = plantView[base+1];
+    const stg  = Math.round(plantView[base+2]);
+    const wr   = plantView[base+3];
+    const cf   = plantView[base+4];
+    const [cx,cy] = wtc(wx, wy);
+    if (cx < -20||cx > canvas.width+20||cy < -20||cy > canvas.height+20) continue;
+    const scale = 1.0 - cf * 0.85;
+    const rad   = Math.max(1.2, wr * pxPerWorld * scale);
+
+    if (showGenome && stg === 2) {
+      const tv         = plantView[base + 5 + traitIdx];
+      const normalized = Math.min(1.0, Math.max(0.0, (tv - 0.02) / 1.48));
+      ctx.globalAlpha  = 0.92;
+      const gRad = Math.max(3, rad * 1.6);
+
+      // Genome view: fill only with selected trait color — clean and unambiguous
+      ctx.fillStyle = traitColor(normalized);
+      ctx.beginPath(); ctx.arc(cx, cy, gRad, 0, Math.PI*2); ctx.fill();
+
+    } else {
+      ctx.globalAlpha = Math.max(0.05, 1.0 - cf * 0.9);
+      if (stg === 2) {
+        // Mature plants: encode nutrient_efficiency (trait 2) + growth_rate (trait 3)
+        // via color and brightness. Size already encoded in radius.
+        const ne  = plantView[base + 5 + 2];  // nutrient_efficiency
+        const gr  = plantView[base + 5 + 3];  // growth_rate
+        // Normalize to 0-1 (budget=4, 8 traits, avg=0.5, range roughly 0.02-1.5)
+        const neN = Math.min(1.0, Math.max(0.0, (ne - 0.02) / 1.48));
+        const grN = Math.min(1.0, Math.max(0.0, (gr - 0.02) / 1.48));
+        // Hue: 95° (yellow-green, low efficiency) → 135° (deep green, high efficiency)
+        const hue = 95 + neN * 40;
+        // Saturation: 25% (slow grower, muted) → 90% (fast grower, vivid)
+        const sat = 40 + grN * 55;
+        // Lightness: 42%→74% — always lighter than dark terrain
+        const lit = 42 + grN * 32;
+        ctx.fillStyle = `hsl(${hue},${sat}%,${lit}%)`;
+      } else if (stg === 1) {
+        // Seedlings: darker, smaller — fixed color
+        ctx.fillStyle = PLANT_COLOURS[1];
+      } else {
+        ctx.fillStyle = PLANT_COLOURS[stg] || PLANT_COLOURS[2];
+      }
+      // Thin dark outline separates plant from terrain regardless of color
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth   = Math.max(0.5, rad * 0.18);
+      ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI*2);
+      ctx.fill(); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1.0;
+}
+
+// Blue (low) → green (mid) → orange (high) gradient
+function traitColor(v) {
+  if (v < 0.5) {
+    const t = v * 2;
+    return `rgb(${Math.round(lerp(20,80,t))},${Math.round(lerp(80,200,t))},${Math.round(lerp(200,80,t))})`;
+  } else {
+    const t = (v - 0.5) * 2;
+    return `rgb(${Math.round(lerp(80,255,t))},${Math.round(lerp(200,140,t))},${Math.round(lerp(80,20,t))})`;
+  }
+}
+
+const STATE_COLOURS = [
+  '#50c8ff',  // 0 wandering
+  '#a0ff60',  // 1 eating
+  '#70d8ff',  // 2 foraging
+  '#c0f0ff',  // 3 sated (reserved)
+  '#c080ff',  // 4 following
+  '#ffe060',  // 5 homing
+  '#ff7878',  // 6 alarmed
+  '#4080c0',  // 7 resting
+  '#ff2020',  // 8 fleeing
+];
+const CARN_STATE_COLOURS = ['#ff6040','#ff9020','#ff2000','#ff0060','#804030','#ff8060'];
+const CARN_STATE_NAMES   = ['Wandering','Stalking','Chasing','Latched','Resting','Homing'];
+const SPECIES_RING = ['#2060a0','#a02020'];
+
+function drawHerbs() {
+  if (!herbView || !stats.nHerbsActive) return;
+  const nH = stats.nHerbsActive;
+  const pxPerWorld = camZ / (worldW / terrainCols);
+  for (let i = 0; i < nH; i++) {
+    const wx    = herbView[i*7],   wy    = herbView[i*7+1];
+    const state = Math.round(herbView[i*7+2]);
+    const wrad  = herbView[i*7+4];
+    const vx    = herbView[i*7+5], vy    = herbView[i*7+6];
+    const [cx,cy] = wtc(wx, wy);
+    if (cx<-20||cx>canvas.width+20||cy<-20||cy>canvas.height+20) continue;
+    const rad = Math.max(4, wrad * pxPerWorld);
+    ctx.strokeStyle = SPECIES_RING[0];
+    ctx.lineWidth   = Math.max(1, rad * 0.28);
+    ctx.beginPath(); ctx.arc(cx, cy, rad*0.82, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#0e1620';
+    ctx.beginPath(); ctx.arc(cx, cy, rad*0.72, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = STATE_COLOURS[state] || STATE_COLOURS[0];
+    ctx.beginPath(); ctx.arc(cx, cy, rad*0.38, 0, Math.PI*2); ctx.fill();
+    if (rad > 6) {
+      const fovHalf = (150 - 0.5*100) * Math.PI/180;
+      const facing  = Math.atan2(vy, vx);
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth   = Math.max(0.5, rad*0.09);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(facing)*rad*1.15, cy + Math.sin(facing)*rad*1.15);
+      ctx.stroke();
+      if (rad > 10) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+        ctx.lineWidth   = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, rad*1.5, facing-fovHalf, facing+fovHalf);
+        ctx.closePath(); ctx.stroke();
+      }
+    }
+  }
+}
+
+function drawCarns() {
+  if (!carnView || !stats.nCarnsActive) return;
+  const nC         = stats.nCarnsActive;
+  const stride     = 6;
+  const pxPerWorld = camZ / (worldW / terrainCols);
+  for (let i = 0; i < nC; i++) {
+    const wx    = carnView[i*stride],   wy  = carnView[i*stride+1];
+    const state = Math.round(carnView[i*stride+2]);
+    const wrad  = carnView[i*stride+3];
+    const vx    = carnView[i*stride+4], vy  = carnView[i*stride+5];
+    const [cx, cy] = wtc(wx, wy);
+    if (cx<-30||cx>canvas.width+30||cy<-30||cy>canvas.height+30) continue;
+    // Minimum 8px so carnivores are always visible even at world zoom
+    const rad = Math.max(8, wrad * pxPerWorld);
+
+    // Outer species ring — deep red
+    ctx.strokeStyle = '#901020';
+    ctx.lineWidth   = Math.max(2, rad * 0.32);
+    ctx.beginPath(); ctx.arc(cx, cy, rad*0.85, 0, Math.PI*2); ctx.stroke();
+
+    // Dark body
+    ctx.fillStyle = '#1a0808';
+    ctx.beginPath(); ctx.arc(cx, cy, rad*0.72, 0, Math.PI*2); ctx.fill();
+
+    // State color center dot
+    ctx.fillStyle = CARN_STATE_COLOURS[state] || CARN_STATE_COLOURS[0];
+    ctx.beginPath(); ctx.arc(cx, cy, rad*0.40, 0, Math.PI*2); ctx.fill();
+
+    // Velocity arrow
+    if (rad > 5) {
+      const facing = Math.atan2(vy, vx);
+      ctx.strokeStyle = 'rgba(255,100,60,0.9)';
+      ctx.lineWidth   = Math.max(1.5, rad*0.12);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(facing)*rad*1.4, cy + Math.sin(facing)*rad*1.4);
+      ctx.stroke();
+    }
+
+    // Latched — pulsing danger ring
+    if (state === 3) {
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.01);
+      ctx.strokeStyle = `rgba(255,0,60,${0.4 + pulse*0.6})`;
+      ctx.lineWidth   = 2.5;
+      ctx.beginPath(); ctx.arc(cx, cy, rad*1.9, 0, Math.PI*2); ctx.stroke();
+    }
+
+    // Debug label
+    if (debugMode) {
+      const label = CARN_STATE_NAMES[state] || '?';
+      ctx.font      = `${Math.max(9, Math.min(13, camZ*2))}px monospace`;
+      const tw      = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(10,0,0,0.82)';
+      ctx.fillRect(cx-tw/2-2, cy-rad-16, tw+4, 14);
+      ctx.fillStyle = CARN_STATE_COLOURS[state] || '#fff';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, cx, cy-rad-5);
+      // agent id below (matches trace + focus filter)
+      const clabel = '#' + (carnIdView ? Math.round(carnIdView[i]) : i);
+      ctx.font        = `${Math.max(9, Math.min(12, camZ*1.7))}px monospace`;
+      ctx.lineWidth   = 2.5;
+      ctx.lineJoin    = 'round';
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+      ctx.strokeText(clabel, cx, cy+rad+12);
+      ctx.fillStyle   = '#ffd060';
+      ctx.fillText(clabel, cx, cy+rad+12);
+      ctx.textAlign = 'left';
+    }
+  }
+}
+
+function drawBirthFlashes() {
+  if (!birthFlashes.length) return;
+  const pxPerWorld = camZ / (worldW / terrainCols);
+  birthFlashes = birthFlashes.filter(f => f.age < 30);
+  for (const f of birthFlashes) {
+    const [cx,cy] = wtc(f.x, f.y);
+    const rad   = (f.age/30) * 20 * pxPerWorld;
+    const alpha = 1.0 - f.age/30;
+    ctx.strokeStyle = `rgba(255,255,255,${alpha*0.8})`;
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI*2); ctx.stroke();
+    f.age++;
+  }
+
+  // Alarm ripples from alarmed/fleeing herbs
+  if (herbView && stats.nHerbsActive) {
+    const pxW = camZ / (worldW / terrainCols);
+    const nH  = stats.nHerbsActive;
+    for (let i = 0; i < nH; i++) {
+      const state = Math.round(herbView[i*7+2]);
+      if (state !== 6 && state !== 8) continue;
+      const [cx, cy] = wtc(herbView[i*7], herbView[i*7+1]);
+      const t   = (Date.now() * 0.003) % 1.0;
+      const rad = t * 28 * pxW;
+      ctx.strokeStyle = `rgba(255,100,30,${(1-t)*0.55})`;
+      ctx.lineWidth   = 1.2;
+      ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, rad), 0, Math.PI*2); ctx.stroke();
+    }
+  }
+}
+
+const STATE_NAMES = ['Wandering','Eating','Foraging','Sated','Following','Homing','Alarmed','Resting','Fleeing'];
+
+function drawDebugOverlay() {
+  if (!herbView || !stats.nHerbsActive) return;
+  const nH = stats.nHerbsActive;
+  const pxPerWorld = camZ / (worldW / terrainCols);
+  ctx.save();
+  ctx.font = `${Math.max(9, Math.min(13, camZ*2))}px monospace`;
+  for (let i = 0; i < nH; i++) {
+    const wx    = herbView[i*7],   wy    = herbView[i*7+1];
+    const state = Math.round(herbView[i*7+2]);
+    const wrad  = herbView[i*7+4];
+    const vx    = herbView[i*7+5], vy    = herbView[i*7+6];
+    const [cx,cy] = wtc(wx, wy);
+    if (cx<-50||cx>canvas.width+50||cy<-50||cy>canvas.height+50) continue;
+    const rad    = Math.max(4, wrad * pxPerWorld);
+    const facing = Math.atan2(vy, vx);
+    const fovHalf= (150 - 0.5*100) * Math.PI/180;
+    const fovR   = Math.max(rad*3, (30+0.375*120)*pxPerWorld);
+    ctx.strokeStyle = 'rgba(255,255,200,0.25)';
+    ctx.lineWidth   = 0.8;
+    ctx.beginPath(); ctx.moveTo(cx,cy);
+    ctx.arc(cx, cy, fovR, facing-fovHalf, facing+fovHalf);
+    ctx.closePath(); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth   = 1.2;
+    const ex = cx + Math.cos(facing)*rad*1.8;
+    const ey = cy + Math.sin(facing)*rad*1.8;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(ex,ey); ctx.stroke();
+    const label = STATE_NAMES[state]||'?';
+    const tw    = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(10,14,24,0.75)';
+    ctx.fillRect(cx-tw/2-2, cy-rad-16, tw+4, 14);
+    ctx.fillStyle = STATE_COLOURS[state]||'#fff';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, cx, cy-rad-5);
+    const hlabel = '#' + (herbIdView ? Math.round(herbIdView[i]) : i);
+    ctx.font = `${Math.max(9, Math.min(12, camZ*1.7))}px monospace`;
+    ctx.lineWidth   = 2.5;
+    ctx.lineJoin    = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.strokeText(hlabel, cx, cy+rad+12);   // dark outline for contrast on any terrain
+    ctx.fillStyle   = '#ffe070';             // bright amber — agent id (matches trace + focus)
+    ctx.fillText(hlabel, cx, cy+rad+12);
+    ctx.font = `${Math.max(9, Math.min(13, camZ*2))}px monospace`;
+  }
+  ctx.textAlign = 'left';
+  ctx.restore();
+  ctx.fillStyle = 'rgba(150,170,200,0.5)';
+  ctx.font      = '10px monospace';
+  ctx.fillText('D = toggle debug  |  FOV arc + state + velocity shown', 10, canvas.height-10);
+}
+
+function elevToRgb(elev, water, hillshade, nutrient, nOp) {
+  let r,g,b;
+  if (water > 0.5) {
+    if      (elev < 0.15) { r=12; g=28;  b=60;  }
+    else if (elev < 0.25) { r=18; g=48;  b=90;  }
+    else                  { r=28; g=70;  b=115; }
+  } else {
+    const nb = (nutrient-0.5)*12;
+    if      (elev < 0.38) { r=85; g=70+nb*0.3; b=42; }
+    else if (elev < 0.55) { const t=(elev-0.38)/0.17; r=lerp(30,40,t); g=lerp(62,72,t)+nb; b=lerp(20,30,t); }
+    else if (elev < 0.72) { const t=(elev-0.55)/0.17; r=lerp(40,55,t); g=lerp(72,75,t)+nb*0.7; b=lerp(30,45,t); }
+    else if (elev < 0.86) { const t=(elev-0.72)/0.14; r=lerp(55,75,t); g=lerp(75,78,t)+nb*0.3; b=lerp(45,62,t); }
+    else                  { const t=(elev-0.86)/0.14; r=lerp(75,120,t); g=lerp(78,122,t); b=lerp(65,112,t); }
+    r=Math.max(0,Math.min(255,r)); g=Math.max(0,Math.min(255,g)); b=Math.max(0,Math.min(255,b));
+  }
+  const shade = 0.35 + hillshade*1.3;
+  r=Math.min(255,Math.max(0,r*shade));
+  g=Math.min(255,Math.max(0,g*shade));
+  b=Math.min(255,Math.max(0,b*shade));
+
+  // Terrain at full color — plants use bright HSL range for contrast
+  if (nOp > 0 && water < 0.5) {
+    const na = nutrient*nOp;
+    r=lerp(r,215,na); g=lerp(g,130,na); b=lerp(b,28,na);
+  }
+  return [Math.round(r), Math.round(g), Math.round(b)];
+}
+function lerp(a,b,t) { return a+(b-a)*t; }
+
+// ---------------------------------------------------------------------------
+// HUD
+// ---------------------------------------------------------------------------
+function updateHUD() {
+  if (!stats.frame) return;
+  document.getElementById('h-gen').textContent      =
+    stats.generation + '  (f:' + stats.frame + ')';
+  document.getElementById('h-mature').textContent   = stats.nPlantsMature;
+  document.getElementById('h-seedling').textContent = stats.nPlantsSeeding;
+  document.getElementById('h-seeds').textContent    = stats.nPlantsSeeds;
+  document.getElementById('h-herbs').textContent    = herbsEnabled ? (stats.nHerbs || 0) : '—';
+  document.getElementById('h-carns').textContent    = carnsEnabled ? (stats.nCarns || 0) : '—';
+  document.getElementById('h-fps').textContent      = Math.round(fpsFilter);
+  document.getElementById('h-eats').textContent     = stats.diagEats;
+  document.getElementById('h-starv').textContent    = stats.diagStarvations;
+  document.getElementById('h-agedeath').textContent = stats.diagAvgAge;
+  document.getElementById('h-locked').textContent   = stats.diagLocked;
+  document.getElementById('h-energy').textContent   =
+    stats.nHerbs > 0 ? stats.diagEnergy.toFixed(1) : '—';
+  document.getElementById('h-nutr').textContent     = '—';
+}
+
+// ---------------------------------------------------------------------------
+// Population chart
+// ---------------------------------------------------------------------------
+const popChart = document.getElementById('popchart');
+const popCtx   = popChart.getContext('2d');
+
+function drawPopChart() {
+  const n = popHistory.length;
+  if (n < 2) return;
+  const cw = popChart.width, ch = popChart.height;
+  popCtx.fillStyle = '#0e1016';
+  popCtx.fillRect(0, 0, cw, ch);
+  let maxP=1, maxH=1;
+  for (const [,p,h] of popHistory) { if(p>maxP) maxP=p; if(h>maxH) maxH=h; }
+  const maxVal = Math.max(maxP, maxH, 1);
+  popCtx.strokeStyle = '#90d858'; popCtx.lineWidth = 1.5;
+  popCtx.beginPath();
+  for (let i=0;i<n;i++) {
+    const x=i/(n-1)*cw, y=ch-(popHistory[i][1]/maxVal)*(ch-4)-2;
+    i===0?popCtx.moveTo(x,y):popCtx.lineTo(x,y);
+  }
+  popCtx.stroke();
+  popCtx.strokeStyle = '#50c8ff'; popCtx.lineWidth = 1.5;
+  popCtx.beginPath();
+  for (let i=0;i<n;i++) {
+    const x=i/(n-1)*cw, y=ch-(popHistory[i][2]/maxVal)*(ch-4)-2;
+    i===0?popCtx.moveTo(x,y):popCtx.lineTo(x,y);
+  }
+  popCtx.stroke();
+  // Carnivore line — scaled separately so small numbers are visible
+  const maxC = Math.max(1, ...popHistory.map(d=>d[3]||0));
+  const carnScale = Math.min(1.0, (ch*0.4) / maxC);
+  popCtx.strokeStyle = '#ff6040'; popCtx.lineWidth = 1.5;
+  popCtx.beginPath();
+  for (let i=0;i<n;i++) {
+    const x=i/(n-1)*cw;
+    const y=ch-((popHistory[i][3]||0)*carnScale)-2;
+    i===0?popCtx.moveTo(x,y):popCtx.lineTo(x,y);
+  }
+  popCtx.stroke();
+  if (n>0) {
+    popCtx.font='9px monospace';
+    popCtx.fillStyle='#90d858';
+    popCtx.fillText('P:'+popHistory[n-1][1], 4, 12);
+    popCtx.fillStyle='#50c8ff';
+    popCtx.fillText('H:'+popHistory[n-1][2], 4, 23);
+    popCtx.fillStyle='#ff6040';
+    popCtx.fillText('C:'+(popHistory[n-1][3]||0), 4, 34);
+  }
+}
+
+function drawPopChartFromHistory(data, len, gen) {
+  // Used when worker sends full history
+  drawPopChart();
+}
+
+window.exportChart = function() {
+  const exp = document.createElement('canvas');
+  exp.width = 800; exp.height = 300;
+  const ec  = exp.getContext('2d');
+  const n   = popHistory.length;
+  if (n < 2) return;
+  ec.fillStyle = '#0e1016'; ec.fillRect(0,0,800,300);
+  let maxP=1,maxH=1;
+  for (const [,p,h] of popHistory) { if(p>maxP) maxP=p; if(h>maxH) maxH=h; }
+  const maxVal = Math.max(maxP,maxH,1);
+  ec.fillStyle='#6080a0'; ec.font='13px sans-serif';
+  ec.fillText(`Evolution Simulator — Population History  Gen ${stats.generation||'?'}`, 10, 18);
+  ec.strokeStyle='#90d858'; ec.lineWidth=2;
+  ec.beginPath();
+  for(let i=0;i<n;i++){const x=(i/(n-1))*760+20,y=290-(popHistory[i][1]/maxVal)*260;i===0?ec.moveTo(x,y):ec.lineTo(x,y);}
+  ec.stroke();
+  ec.strokeStyle='#50c8ff'; ec.lineWidth=2;
+  ec.beginPath();
+  for(let i=0;i<n;i++){const x=(i/(n-1))*760+20,y=290-(popHistory[i][2]/maxVal)*260;i===0?ec.moveTo(x,y):ec.lineTo(x,y);}
+  ec.stroke();
+  const a=document.createElement('a');
+  a.download=`evo_sim_population_gen${stats.generation||0}.png`;
+  a.href=exp.toDataURL(); a.click();
+};
+
+// ---------------------------------------------------------------------------
+// Mouse / wheel
+// ---------------------------------------------------------------------------
+let dragging=false, dragSX=0, dragSY=0, dragCX=0, dragCY=0;
+canvas.addEventListener('mousedown', e => {
+  // Check for inspector click first (single click, not drag)
+  dragging=true; dragSX=e.clientX; dragSY=e.clientY;
+  dragCX=camX; dragCY=camY; wrap.classList.add('dragging');
+});
+window.addEventListener('mousemove', e => {
+  if(!dragging) return;
+  camX=dragCX-(e.clientX-dragSX)/camZ;
+  camY=dragCY-(e.clientY-dragSY)/camZ;
+  terrainDirty=true;
+});
+window.addEventListener('mouseup', e => {
+  const moved = Math.abs(e.clientX-dragSX) + Math.abs(e.clientY-dragSY);
+  dragging=false; wrap.classList.remove('dragging');
+  if (moved < 4) handleInspectorClick(e);  // was a click not a drag
+});
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const dir=e.deltaY<0?1:-1;
+  const mx=e.offsetX, my=e.offsetY;
+  const wx=mx/camZ+camX, wy=my/camZ+camY;
+  const factor=dir>0?1.25:0.8;
+  camZ=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,camZ*factor));
+  camX=wx-mx/camZ; camY=wy-my/camZ;
+  document.getElementById('zoom-display').textContent=camZ.toFixed(1)+'×';
+  terrainDirty=true;
+}, {passive:false});
+
+// ---------------------------------------------------------------------------
+// Keyboard
+// ---------------------------------------------------------------------------
+window.addEventListener('keydown', e => {
+  if (e.key===' '||e.key==='p'||e.key==='P') { e.preventDefault(); togglePause(); }
+  if (e.key==='.') { e.preventDefault(); stepOnce(); }
+  if (e.key==='r'||e.key==='R') restartCurrentSeed();
+  if (e.key==='d'||e.key==='D') {
+    debugMode=!debugMode;
+    document.getElementById('debug-indicator').textContent=debugMode?'🔬 DEBUG ON':'';
+  }
+  if (e.key==='f'||e.key==='F') {
+    const sld=document.querySelector('input[oninput*="NutrientOpacity"]');
+    if(sld){sld.value=sld.value==='0'?'0.6':'0'; setNutrientOpacity(sld.value);}
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Controls — all send messages to worker
+// ---------------------------------------------------------------------------
+window.togglePause = function() {
+  paused=!paused;
+  worker.postMessage({ type: paused ? 'pause' : 'resume' });
+  document.getElementById('btn-pause').textContent = paused?'▶ Resume':'⏸ Pause';
+  document.getElementById('btn-pause').className   = paused?'btn active':'btn primary';
+  document.getElementById('pause-overlay').style.display = paused?'block':'none';
+  document.getElementById('btn-step').disabled = !paused;   // step only while paused
+};
+
+window.stepOnce = function() {
+  if (!paused) return;                        // only meaningful while paused
+  worker.postMessage({ type: 'step' });
+};
+
+let currentSeed = null;   // last loaded seed; set from each world's config snapshot
+
+window.regenerate = function(seed) {
+  const s = seed!==undefined ? BigInt(seed) : BigInt(Date.now());
+  worker.postMessage({ type:'reset', seed: s });
+};
+
+window.restartCurrentSeed = function() {
+  // Re-run the current seed: same terrain, fresh population.
+  const s = (currentSeed !== null && currentSeed !== undefined)
+    ? BigInt(currentSeed) : BigInt(Date.now());
+  worker.postMessage({ type:'reset', seed: s });
+};
+
+window.loadSeedFromInput = function() {
+  const el = document.getElementById('inp-seed');
+  if (!el) return;
+  const raw = el.value.trim();
+  if (raw === '') return;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n || n > Number.MAX_SAFE_INTEGER) {
+    el.style.borderColor = '#c04040';
+    setTimeout(() => { el.style.borderColor = ''; }, 800);
+    return;
+  }
+  worker.postMessage({ type:'reset', seed: BigInt(n) });
+};
+
+window.loadMainWorld = function() {
+  worker.postMessage({ type:'main_world' });
+};
+
+// Sync the UI to a freshly loaded world's actual settings.
+// Environment values flow world -> UI (sliders reflect the world). The
+// herb/carn enable toggles flow UI -> world (user intent persists across loads).
+function applyConfigSnapshot(json) {
+  if (!json) return;
+  let c;
+  try { c = JSON.parse(json); } catch (e) { return; }
+
+  // Seed: cache for Restart, show in HUD.
+  currentSeed = c.seed;
+  const sd = document.getElementById('h-seed');
+  if (sd) sd.textContent = String(c.seed);
+
+  // Environment sliders: world -> UI.
+  const setSlider = (id, lbl, val, dp) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val;
+    const lb = document.getElementById(lbl);
+    if (lb) lb.textContent = Number(val).toFixed(dp);
+  };
+  setSlider('sld-water', 'lbl-water', c.water_level,         2);
+  setSlider('sld-hs',    'lbl-hs',    c.hillshade_strength,  2);
+  setSlider('sld-flow',  'lbl-flow',  c.nutrient_flow_rate,  4);
+  setSlider('sld-seed',  'lbl-seed',  c.plant_seed_chance,   2);
+  setSlider('sld-pmut',  'lbl-pmut',  c.plant_mutation_rate, 2);
+
+  // Plants-evolve + trace: world -> UI.
+  const ev = document.getElementById('chk-evolve');
+  if (ev) ev.checked = !!c.plants_evolve;
+  const evl = document.getElementById('lbl-evolve');
+  if (evl) { evl.textContent = c.plants_evolve ? 'ON' : 'OFF';
+             evl.style.color = c.plants_evolve ? '#50d080' : '#806040'; }
+  const tc = document.getElementById('chk-trace');
+  if (tc) tc.checked = !!c.trace_enabled;
+  const tl = document.getElementById('lbl-trace');
+  if (tl) { tl.textContent = c.trace_enabled ? 'ON' : 'OFF';
+            tl.style.color = c.trace_enabled ? '#50d080' : '#806040'; }
+  setTracePanelVisible(!!c.trace_enabled);
+
+  // Enable toggles: UI -> world. A freshly built world has herbs/carns on;
+  // re-push the current checkbox state so a plants-only study stays plants-only.
+  worker.postMessage({ type:'set_herbs_enabled', value: herbsEnabled });
+  worker.postMessage({ type:'set_carns_enabled', value: carnsEnabled });
+}
+
+window.resetCamera = resetCamera;
+window.zoomStep    = zoomStep;
+
+window.setSimSpeed = function(v) {
+  simSpeed=parseInt(v);
+  document.getElementById('lbl-simspeed').textContent=v+'×';
+  worker.postMessage({ type:'set_sim_speed', value:simSpeed });
+};
+
+window.setWater = function(v) {
+  document.getElementById('lbl-water').textContent=parseFloat(v).toFixed(2);
+  worker.postMessage({ type:'set_water_level', value:parseFloat(v) });
+  terrainDirty=true;
+};
+window.setHillshade = function(v) {
+  document.getElementById('lbl-hs').textContent=parseFloat(v).toFixed(2);
+  worker.postMessage({ type:'set_hillshade', value:parseFloat(v) });
+  terrainDirty=true;
+};
+window.setFlow = function(v) {
+  document.getElementById('lbl-flow').textContent=parseFloat(v).toFixed(4);
+  worker.postMessage({ type:'set_nutrient_flow', value:parseFloat(v) });
+};
+window.setNutrientOpacity = function(v) {
+  nutrientOpacity=parseFloat(v);
+  document.getElementById('lbl-nop').textContent=parseFloat(v).toFixed(2);
+  terrainDirty=true;
+};
+window.setSeedChance = function(v) {
+  document.getElementById('lbl-seed').textContent=parseFloat(v).toFixed(2);
+  worker.postMessage({ type:'set_seed_chance', value:parseFloat(v) });
+};
+window.setPlantMutation = function(v) {
+  document.getElementById('lbl-pmut').textContent=parseFloat(v).toFixed(2);
+  worker.postMessage({ type:'set_plant_mutation', value:parseFloat(v) });
+};
+window.setPlantsEvolve = function(v) {
+  worker.postMessage({ type:'set_plants_evolve', value:v });
+  document.getElementById('lbl-evolve').textContent=v?'ON':'OFF';
+  document.getElementById('lbl-evolve').style.color=v?'#50d080':'#806040';
+};
+
+// Organism enable/disable
+let herbsEnabled = true;
+let carnsEnabled = true;
+
+window.setHerbsEnabled = function(v) {
+  herbsEnabled = v;
+  worker.postMessage({ type:'set_herbs_enabled', value:v });
+};
+
+window.setCarnsEnabled = function(v) {
+  carnsEnabled = v;
+  worker.postMessage({ type:'set_carns_enabled', value:v });
+};
+
+// Genome visualization
+let genomeViewTrait = 'none';  // 'none' or trait index 0-7
+
+window.setGenomeView = function(v) {
+  genomeViewTrait = v;
+  terrainDirty = true;  // rebuild terrain cache with new overlay
+};
+
+window.loadDevWorld = function() {
+  worker.postMessage({ type:'dev_world' });
+};
+
+window.toggleTrace = function(on) {
+  worker.postMessage({ type:'set_trace', value:on });
+  const l = document.getElementById('lbl-trace');
+  if (l) { l.textContent = on ? 'ON' : 'OFF';
+           l.style.color = on ? '#50d080' : '#806040'; }
+  setTracePanelVisible(on);
+};
+
+// Per-agent trace focus: 0/blank = all agents. NOTE: herb & carn ids overlap,
+// so a focus value can match both carn#N and herb#N.
+window.setTraceFocus = function(v) {
+  const n = parseInt(v, 10);
+  traceFocus = (Number.isFinite(n) && n > 0) ? n : 0;
+  worker.postMessage({ type:'set_trace_focus', value: traceFocus });
+};
+
+// Scale interpretation (display only — no message to the sim).
+window.setScaleMeters = function(v) {
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) scaleMetersPerUnit = n;
+};
+window.setScaleSecs = function(v) {
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) scaleSecondsPerTick = n;
+};
+
+// Per-agent CSV time-series: tag an agent id (0 = off) to log its metrics each
+// tick; the button downloads the accumulated CSV. Works in any build.
+window.setTraceTag = function() {
+  const idEl   = document.getElementById('inp-trace-tag');
+  const kindEl = document.getElementById('sel-trace-kind');
+  const n = parseInt(idEl ? idEl.value : '', 10);
+  traceTag     = (Number.isFinite(n) && n > 0) ? n : 0;
+  traceTagKind = kindEl ? parseInt(kindEl.value, 10) : 1;
+  worker.postMessage({ type:'set_tag', value: traceTag, kind: traceTagKind });
+};
+window.exportAgentCsv = function() {
+  worker.postMessage({ type:'export_agent_csv' });
+};
+
+window.exportTrace = function() {
+  worker.postMessage({ type:'export_trace' });
+};
+
+// ── Live trace panel ────────────────────────────────────────────────────────
+const TRACE_DISPLAY_LINES = 400;   // tail shown live; full history is in the .txt export
+
+function setTracePanelVisible(on) {
+  const panel = document.getElementById('trace-panel');
+  if (!panel) return;
+  panel.style.display = on ? 'flex' : 'none';
+  if (!on) { const out = document.getElementById('trace-out'); if (out) out.textContent = ''; }
+  resizeCanvas();   // canvas-wrap height changed — refit + force re-render
+}
+
+function updateTracePanel(text) {
+  const out = document.getElementById('trace-out');
+  if (!out) return;
+  // Tail the last N lines so the panel stays snappy (full buffer is in export).
+  const lines = text.split('\n');
+  const shown = lines.length > TRACE_DISPLAY_LINES
+    ? lines.slice(lines.length - TRACE_DISPLAY_LINES).join('\n')
+    : text;
+  // Stick to the bottom unless the user has scrolled up to read.
+  const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 30;
+  out.textContent = shown;
+  if (atBottom) out.scrollTop = out.scrollHeight;
+}
+
+window.toggleTracePanel = function() {
+  const panel = document.getElementById('trace-panel');
+  const btn   = document.getElementById('trace-collapse');
+  if (!panel) return;
+  const collapsed = panel.classList.toggle('collapsed');
+  if (btn) btn.textContent = collapsed ? '▸' : '▾';
+  resizeCanvas();   // height changed — refit + force re-render
+};
+
+window.exportCSV = function() {
+  worker.postMessage({ type:'export_csv' });
+};
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+startWorker();
+</script>
+
+</body>
+</html>
