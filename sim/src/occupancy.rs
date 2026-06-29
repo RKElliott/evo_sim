@@ -1,3 +1,6 @@
+// evo_sim - Copyright (c) 2026 Lens and Mix, LLC
+// Licensed under the Apache License, Version 2.0. See LICENSE and NOTICE.
+// More information: https://rkeithelliott.com
 //! occupancy.rs — Spatial occupancy grid for plants.
 //!
 //! Tracks which terrain cells are occupied by mature plants.

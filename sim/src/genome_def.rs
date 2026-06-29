@@ -1,3 +1,6 @@
+// evo_sim - Copyright (c) 2026 Lens and Mix, LLC
+// Licensed under the Apache License, Version 2.0. See LICENSE and NOTICE.
+// More information: https://rkeithelliott.com
 //! genome_def.rs — Data-driven genome definition system.
 //!
 //! Organisms are defined by a GenomeDef that describes their traits.

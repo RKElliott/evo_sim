@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// evo_sim - Copyright (c) 2026 Lens and Mix, LLC
+// Licensed under the Apache License, Version 2.0. See LICENSE and NOTICE.
+// More information: https://rkeithelliott.com
 /*
  * verify.cjs — headless determinism / regression harness for evo_sim.
  *

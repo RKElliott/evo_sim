@@ -1,3 +1,6 @@
+// evo_sim - Copyright (c) 2026 Lens and Mix, LLC
+// Licensed under the Apache License, Version 2.0. See LICENSE and NOTICE.
+// More information: https://rkeithelliott.com
 //! Deterministic state fingerprinting — FNV-1a 64-bit hasher.
 //!
 //! Used by `SimWorld::state_signature()` and the headless `tools/verify.cjs`

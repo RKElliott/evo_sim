@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# evo_sim - Copyright (c) 2026 Lens and Mix, LLC
+# Licensed under the Apache License, Version 2.0. See LICENSE and NOTICE.
+# More information: https://rkeithelliott.com
 """
 Development server with COOP/COEP headers required for SharedArrayBuffer.
 SharedArrayBuffer enables zero-copy shared memory between main thread and Web Worker.

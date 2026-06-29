@@ -1,3 +1,6 @@
+// evo_sim - Copyright (c) 2026 Lens and Mix, LLC
+// Licensed under the Apache License, Version 2.0. See LICENSE and NOTICE.
+// More information: https://rkeithelliott.com
 //! lib.rs — WASM entry point.
 //!
 //! Exposes SimWorld to JavaScript.

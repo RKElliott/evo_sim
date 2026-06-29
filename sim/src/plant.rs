@@ -1,3 +1,6 @@
+// evo_sim - Copyright (c) 2026 Lens and Mix, LLC
+// Licensed under the Apache License, Version 2.0. See LICENSE and NOTICE.
+// More information: https://rkeithelliott.com
 //! plant.rs — Plant agent with data-driven genome and sexual reproduction.
 //!
 //! Lifecycle: Seed → Seedling → Mature → Dead
