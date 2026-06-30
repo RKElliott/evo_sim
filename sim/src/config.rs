@@ -56,6 +56,11 @@ pub struct Config {
     /// 0.35 gives roughly 30% water coverage on typical noise terrain.
     pub water_level: f32,
 
+    /// When true, terrain is a smooth wet→dry linear ramp (plant lab) instead
+    /// of Perlin noise — low elevation on the left, high on the right, so the
+    /// shoreline moves smoothly as water_level changes (seasons).
+    pub terrain_flat_ramp: bool,
+
     // -----------------------------------------------------------------------
     // Plant settings
     // -----------------------------------------------------------------------
@@ -197,6 +202,7 @@ impl Default for Config {
             noise_lacunarity:      2.0,
 
             water_level:           0.35,
+            terrain_flat_ramp:     false,
 
             nutrient_flow_rate:    0.002,
             nutrient_decay_rate:   0.0001,

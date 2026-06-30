@@ -149,6 +149,18 @@
     width: 100%; order: 99;
   }
   /* ── Live trace panel — docked below canvas, shown only when Trace is on ── */
+  #settings-panel {
+    position: fixed; top: 84px; right: 12px; width: 224px;
+    background: rgba(8,12,22,0.96); border: 1px solid #2a3648;
+    border-radius: 8px; font-family: monospace; z-index: 60; color: #c0d0e0;
+  }
+  #settings-head {
+    display:flex; justify-content:space-between; align-items:center;
+    padding: 6px 10px; border-bottom: 1px solid #2a3648; font-size: 13px;
+  }
+  #settings-body { padding: 8px; display:flex; flex-direction:column; gap:6px; }
+  #settings-body .row { display:flex; gap:6px; }
+  #settings-body .row .btn { flex:1; }
   #trace-panel {
     display: none;              /* flex when tracing is on */
     flex-direction: column;
@@ -311,6 +323,23 @@
   </div>
 
   <!-- ── Live trace panel (shown when Trace is on) ── -->
+  <div id="settings-panel" style="display:none">
+    <div id="settings-head">
+      <span>⚙ Sim Settings</span>
+      <button class="btn" style="padding:0 6px" onclick="toggleSettings()">✕</button>
+    </div>
+    <div id="settings-body">
+      <button class="btn" onclick="loadPlantLab()">🌱 New Plant Lab</button>
+      <div style="color:#6a7a8a;font-size:11px">Click the map to place plants:</div>
+      <div class="row">
+        <button class="btn" id="place-seed"   onclick="setPlace('seed')">Seed</button>
+        <button class="btn" id="place-mature" onclick="setPlace('mature')">Mature</button>
+      </div>
+      <button class="btn danger" onclick="clearPlants()">Clear Plants</button>
+      <div style="color:#6a7a8a;font-size:11px;border-top:1px solid #2a3648;padding-top:6px">
+        Seasons sliders land here next.</div>
+    </div>
+  </div>
   <div id="trace-panel">
     <div id="trace-panel-head">
       <span>📋 Trace</span>
@@ -359,6 +388,8 @@
             onclick="loadMainWorld()">🌍 Main World</button>
     <button class="btn" style="background:#102818;border-color:#204830;color:#60d080"
             onclick="loadDevWorld()">🔬 Dev World</button>
+    <button class="btn" style="background:#1a1420;border-color:#3a2a48;color:#b080d0"
+            onclick="toggleSettings()">⚙ Lab</button>
     <label class="ctrl-check">
       <input type="checkbox" id="chk-trace"
              onchange="toggleTrace(this.checked)">
@@ -499,7 +530,10 @@ let traceTagKind        = 1;    // 0=Any (herb-first), 1=Carn, 2=Herb
 // ---------------------------------------------------------------------------
 let worker       = null;
 let workerReady  = false;
-let paused       = false;
+let paused       = true;
+let placeMode    = false;   // plant-lab: click to drop plants
+let lastPopSample = -1e9;   // last sim-frame sampled into popHistory
+let placeMature  = false;   // false = seed, true = mature
 let running      = false;
 let animId       = null;
 let lastTime     = 0;
@@ -562,6 +596,11 @@ function handleInspectorClick(e) {
   const py   = e.clientY - rect.top;
   const wx   = px / camZ + camX;
   const wy   = py / camZ + camY;
+  if (placeMode) {
+    if (wx >= 0 && wy >= 0 && wx < worldW && wy < worldH)
+      worker.postMessage({ type:'add_plant', x:wx, y:wy, mature: placeMature });
+    return;
+  }
   const found = findNearestAgent(wx, wy);
   if (found) showInspector(found, px, py);
   else document.getElementById('inspector').style.display = 'none';
@@ -813,6 +852,7 @@ function handleWorkerMessage(e) {
       applyConfigSnapshot(msg.config);
       resetCamera();
       requestAnimationFrame(loop);
+      syncPauseUI();
       document.getElementById('status').textContent =
         'SPACE pause · . step · R restart · scroll zoom · drag pan · D debug · F nutrients';
       break;
@@ -860,8 +900,10 @@ function handleWorkerMessage(e) {
         }
       }
 
-      // Record pop history
-      if (stats.frame % 30 === 0) {
+      // Record pop history — sample by elapsed ticks, not exact modulo, so it
+      // keeps firing at high sim speed (where stats.frame arrives in big jumps).
+      if (stats.frame - lastPopSample >= 30) {
+        lastPopSample = stats.frame;
         popHistory.push([stats.frame, stats.nPlantsMature, stats.nHerbs, stats.nCarns || 0]);
         if (popHistory.length > 4000) popHistory.shift();
       }
@@ -883,6 +925,7 @@ function handleWorkerMessage(e) {
       terrainCanvas = null;
       terrainDirty  = true;
       popHistory    = [];
+      lastPopSample = -1e9;
       applyConfigSnapshot(msg.config);
       if (!sameSize) resetCamera();
       break;
@@ -1558,13 +1601,30 @@ window.addEventListener('keydown', e => {
 // ---------------------------------------------------------------------------
 // Controls — all send messages to worker
 // ---------------------------------------------------------------------------
+window.syncPauseUI = function() {
+  document.getElementById('btn-pause').textContent = paused?'▶ Resume':'⏸ Pause';
+  document.getElementById('btn-pause').className   = paused?'btn active':'btn primary';
+  const ov = document.getElementById('pause-overlay'); if (ov) ov.style.display = paused?'block':'none';
+  document.getElementById('btn-step').disabled = !paused;   // step only while paused
+};
 window.togglePause = function() {
   paused=!paused;
   worker.postMessage({ type: paused ? 'pause' : 'resume' });
-  document.getElementById('btn-pause').textContent = paused?'▶ Resume':'⏸ Pause';
-  document.getElementById('btn-pause').className   = paused?'btn active':'btn primary';
-  document.getElementById('pause-overlay').style.display = paused?'block':'none';
-  document.getElementById('btn-step').disabled = !paused;   // step only while paused
+  syncPauseUI();
+};
+window.toggleSettings = function() {
+  const p = document.getElementById('settings-panel');
+  p.style.display = (p.style.display==='none' || !p.style.display) ? 'block' : 'none';
+};
+window.loadPlantLab = function() { worker.postMessage({ type:'plant_lab' }); };
+window.clearPlants  = function() { worker.postMessage({ type:'clear_plants' }); };
+window.setPlace = function(mode) {
+  const wantMature = (mode==='mature');
+  if (placeMode && placeMature===wantMature) { placeMode=false; }
+  else { placeMode=true; placeMature=wantMature; }
+  canvas.style.cursor = placeMode ? 'crosshair' : '';
+  document.getElementById('place-seed').className   = (placeMode&&!placeMature)?'btn active':'btn';
+  document.getElementById('place-mature').className = (placeMode&&placeMature)?'btn active':'btn';
 };
 
 window.stepOnce = function() {

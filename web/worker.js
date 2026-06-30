@@ -14,7 +14,7 @@ import init, { SimWorld } from './pkg/evo_sim.js';
 
 let sim      = null;
 let SimWorld_cls = null;
-let paused   = false;
+let paused   = true;
 let simSpeed = 1;
 let wasmMem  = null;
 let traceLive = false;   // when true, stream the trace buffer to the live panel each frame
@@ -155,6 +155,24 @@ self.onmessage = function(e) {
                 worldW: sim.world_w(), worldH: sim.world_h(),
                 terrainCols: sim.terrain_cols(), terrainRows: sim.terrain_rows(),
                 config: sim.config_snapshot() });
+            break;
+
+        case 'plant_lab':
+            sim = SimWorld_cls.plant_lab();
+            postMessage({ type: 'reset_done',
+                worldW: sim.world_w(), worldH: sim.world_h(),
+                terrainCols: sim.terrain_cols(), terrainRows: sim.terrain_rows(),
+                config: sim.config_snapshot() });
+            break;
+
+        case 'add_plant':
+            sim.add_plant(msg.x, msg.y, msg.mature || false);
+            sendFrame();
+            break;
+
+        case 'clear_plants':
+            sim.clear_plants();
+            sendFrame();
             break;
 
         case 'main_world':

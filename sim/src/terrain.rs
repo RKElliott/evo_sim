@@ -151,6 +151,18 @@ fn generate_elevation(cols: usize, rows: usize, cfg: &Config) -> Vec<f32> {
     let seed = cfg.terrain_seed;
     let mut elev = vec![0.0_f32; n];
 
+    // Plant-lab mode: a smooth wet→dry ramp by column (x). Left edge low (wet,
+    // nutrient-rich), right edge high (dry). water_level sets the shoreline.
+    if cfg.terrain_flat_ramp {
+        let denom = (cols.max(2) - 1) as f32;
+        for row in 0..rows {
+            for col in 0..cols {
+                elev[row * cols + col] = 0.2 + 0.6 * (col as f32 / denom);
+            }
+        }
+        return elev;
+    }
+
     for row in 0..rows {
         for col in 0..cols {
             // Normalized coordinates [0.0, 1.0]

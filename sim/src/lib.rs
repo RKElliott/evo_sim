@@ -222,6 +222,93 @@ impl SimWorld {
         w
     }
 
+    /// Plant lab — a blank study world: smooth wet→dry ramp terrain, no
+    /// auto-seeded organisms, herbs/carns off. The user places plants by hand
+    /// (add_plant) and runs the sim paused-first to set up a scene.
+    pub fn plant_lab() -> Self {
+        carnivore::reset_carn_ids();
+        herbivore::reset_herb_ids();
+        let mut cfg            = config::Config::default();
+        cfg.world_w            = 800.0;
+        cfg.world_h            = 400.0;
+        cfg.terrain_cols       = 64;
+        cfg.terrain_rows       = 32;
+        cfg.terrain_flat_ramp  = true;   // wet→dry linear ramp
+        cfg.water_level        = 0.35;
+        cfg.terrain_seed       = 42;
+        cfg.initial_plants     = 0;      // empty — user places plants
+        cfg.herb_initial_count = 0;
+
+        let terrain = terrain::Terrain::new(&cfg);
+        let rng     = Rng::new(cfg.terrain_seed);
+        let buf_cap = 256usize;          // room for placed/grown plants; grows if exceeded
+        let occ     = OccupancyGrid::new(
+            cfg.terrain_cols, cfg.terrain_rows, cfg.plant_max_per_cell);
+
+        let mut w = SimWorld {
+            terrain, cfg, frame: 0, generation: 1,
+            rng,
+            plants:          Vec::new(),
+            herbs:           Vec::new(),
+            occupancy:       occ,
+            plant_buf:       vec![0.0_f32; buf_cap * 13],
+            herb_buf:        vec![0.0_f32; 7],
+            herb_id_buf:     Vec::new(),
+            n_plants_active: 0,
+            n_herbs_active:  0,
+            pop_history:     Vec::with_capacity(2000),
+            diag_eats:           0,
+            diag_starvations:    0,
+            diag_age_death_sum:  0,
+            diag_plants_locked:  0,
+            diag_energy_sum:     0.0,
+            trace_enabled:       false,
+            trace_buf:           Vec::with_capacity(600),
+            herb_grid:       spatial::SpatialGrid::new(800.0, 400.0, 40.0),
+            plant_def:       plant_genome_def(),
+            herbs_enabled:   false,
+            carns_enabled:   false,
+            carns:           Vec::new(),
+            carn_buf:        vec![0.0_f32; 60],
+            carn_id_buf:     Vec::new(),
+            tag_id:          0,
+            tag_kind:        1,
+            tag_log:         Vec::new(),
+            n_carns_active:  0,
+            carn_grid:       spatial::SpatialGrid::new(800.0, 400.0, 80.0),
+        };
+        w.write_plant_buffer();
+        w.write_herb_buffer();
+        w.write_carn_buffer();
+        w
+    }
+
+    /// Place one plant at world (x, y). Genome is drawn with natural variation
+    /// around the proto-species budget (random + rebalance), and starting
+    /// energy is varied, so placed plants are individuals, not clones.
+    /// `mature` drops a ready-to-reproduce plant; otherwise a fresh seed.
+    pub fn add_plant(&mut self, x: f32, y: f32, mature: bool) {
+        let genome = crate::genome_def::Genome::random(&self.plant_def, &mut self.rng);
+        let mut p  = Plant::new_seed(x, y, genome);
+        if mature {
+            p.stage  = PlantStage::Mature;
+            p.age    = 0;
+            p.energy = self.rng.range(0.5, 0.9);   // varied reserve
+        } else {
+            p.energy = self.rng.range(0.10, 0.20); // slight variation
+        }
+        if let Some((col, row)) = self.cfg.world_to_cell(x, y) {
+            self.occupancy.occupy(col, row);
+        }
+        self.plants.push(p);
+    }
+
+    /// Remove all plants and reset occupancy — clear the lab scene.
+    pub fn clear_plants(&mut self) {
+        self.plants.clear();
+        self.occupancy.clear();
+    }
+
     pub fn with_seed(seed: u64) -> Self {
         carnivore::reset_carn_ids();
         herbivore::reset_herb_ids();
