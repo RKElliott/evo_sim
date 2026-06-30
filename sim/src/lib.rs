@@ -602,20 +602,15 @@ impl SimWorld {
         }
         } // end carns_enabled
 
-        // Canopy shade map — disabled pending plant spatial grid.
-        // O(n²) at 10k+ plants is too expensive. Shade tolerance trait
-        // is in the genome but all plants receive full sun for now.
-        // TODO: add plant spatial grid and re-enable.
+        // Plant update pass. (Shade was removed in the genome redesign — it
+        // confounded experiments; all plants now receive full sun.)
         {
         utils::trace_scope!(Subsystem::Plants, "plant_update");
-        let shade_map = vec![0.0f32; self.plants.len()];
-
         // Update plants — collect new seeds
         let mut new_seeds: Vec<(f32, f32, genome_def::Genome)> = Vec::new();
         let n_plants = self.plants.len();
         for i in 0..n_plants {
             if !self.plants[i].is_alive() { continue; }
-            let shade = shade_map[i];
             // Safety: we pass a read-only slice of all plants for pollen search
             let plants_ref = unsafe {
                 std::slice::from_raw_parts(self.plants.as_ptr(), n_plants)
@@ -624,7 +619,6 @@ impl SimWorld {
                 &self.terrain,
                 &self.cfg,
                 &mut self.rng,
-                shade,
                 plants_ref,
                 &self.plant_def,
             );
@@ -761,7 +755,7 @@ impl SimWorld {
                 if let Some((col, row)) = self.cfg.world_to_cell(
                     self.plants[pi].x, self.plants[pi].y) {
                     // Return some nutrients to terrain when plant is consumed
-                    let sz = self.plants[pi].genome.get(genome_def::PT_SIZE);
+                    let sz = self.plants[pi].genome.get(genome_def::PT_SIZE_AT_MATURITY);
                     self.terrain.deposit_nutrient(col, row, sz * 0.02);
                 }
             }

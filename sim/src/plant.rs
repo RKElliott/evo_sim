@@ -16,7 +16,7 @@ use crate::config::Config;
 use crate::genome_def::{
     Genome, GenomeDef,
     PT_DROUGHT_TOLERANCE, PT_FLOOD_TOLERANCE, PT_NUTRIENT_EFFICIENCY,
-    PT_GROWTH_RATE, PT_SEED_COUNT, PT_SEED_SPREAD, PT_SIZE, PT_SHADE_TOLERANCE,
+    PT_SIZE_AT_MATURITY, PT_SEED_SIZE, PT_SEED_QUANTITY,
 };
 use crate::rng::Rng;
 use crate::terrain::Terrain;
@@ -69,12 +69,13 @@ impl Plant {
 
     /// Derived stats from genome
     pub fn maturation_ticks(&self, cfg: &Config) -> u32 {
-        let gr = self.genome.get(PT_GROWTH_RATE);
-        (cfg.plant_seedling_ticks as f32 / (cfg.plant_maturation_growth_base + gr * cfg.plant_maturation_growth_scale)) as u32
+        // Interim (stage 3): constant maturation. Stage 4 makes maturity
+        // energy-driven (reach size_at_maturity), retiring this tick-based path.
+        cfg.plant_seedling_ticks
     }
 
     pub fn visual_radius(&self) -> f32 {
-        let sz = self.genome.get(PT_SIZE);
+        let sz = self.genome.get(PT_SIZE_AT_MATURITY);
         match self.stage {
             PlantStage::Seed     => 1.5,
             PlantStage::Seedling => 2.0 + sz * 3.0,
@@ -84,34 +85,36 @@ impl Plant {
     }
 
     pub fn canopy_radius(&self) -> f32 {
-        let sz = self.genome.get(PT_SIZE);
+        let sz = self.genome.get(PT_SIZE_AT_MATURITY);
         4.0 + sz * 16.0  // shadow radius — larger plants shade more
     }
 
     pub fn pollen_range(&self, cfg: &Config) -> f32 {
-        let ss = self.genome.get(PT_SEED_SPREAD);
-        cfg.plant_pollen_range_base + ss * cfg.plant_pollen_range_scale  // local pollination — keeps gene flow regional
+        // Interim (stage 3): constant mating neighborhood. Stage 9 (distance-
+        // reduced pollination) gives this a proper, species-aware basis.
+        cfg.plant_pollen_range_base + cfg.plant_pollen_range_scale * 0.5
     }
 
     pub fn seed_spread(&self, cfg: &Config) -> f32 {
-        let ss = self.genome.get(PT_SEED_SPREAD);
-        cfg.plant_seed_dispersal_base + ss * cfg.plant_seed_dispersal_scale  // short dispersal promotes local adaptation
+        // Dispersal derives from seed_size: small seeds travel far, large seeds
+        // land near the parent. (1 - size) inverts the relationship.
+        let sz = self.genome.get(PT_SEED_SIZE);
+        cfg.plant_seed_dispersal_base + (1.0 - sz).max(0.0) * cfg.plant_seed_dispersal_scale
     }
 
     pub fn seeds_per_cycle(&self, cfg: &Config) -> u32 {
-        let sc = self.genome.get(PT_SEED_COUNT);
+        let sc = self.genome.get(PT_SEED_QUANTITY);
         ((cfg.plant_base_seeds as f32) * (cfg.plant_seed_count_base + sc * cfg.plant_seed_count_scale)) as u32
     }
 
     pub fn nutrient_draw(&self) -> f32 {
-        let sz  = self.genome.get(PT_SIZE);
-        let gr  = self.genome.get(PT_GROWTH_RATE);
-        0.0002 + sz * 0.0003 + gr * 0.0002
+        let sz = self.genome.get(PT_SIZE_AT_MATURITY);
+        0.0002 + sz * 0.0003
     }
 
     pub fn energy_value(&self, cfg: &Config) -> f32 {
         // Nutritional energy a herbivore gains from eating this plant.
-        let sz = self.genome.get(PT_SIZE);
+        let sz = self.genome.get(PT_SIZE_AT_MATURITY);
         cfg.plant_energy_value_base + sz * cfg.plant_energy_value_scale
     }
 
@@ -128,7 +131,6 @@ impl Plant {
         terrain:    &Terrain,
         cfg:        &Config,
         rng:        &mut Rng,
-        shade:      f32,        // 0.0 = full sun, 1.0 = full shade
         all_plants: &[Plant],   // for pollen search
         def:        &GenomeDef,
     ) -> Vec<Genome> {
@@ -162,15 +164,11 @@ impl Plant {
             }
         }
 
-        // Shade check — low shade tolerance in full shade stunts growth
-        let shade_tolerance = self.genome.get(PT_SHADE_TOLERANCE);
-        let effective_shade = (shade - shade_tolerance).max(0.0);
-
         // ── Nutrient draw ────────────────────────────────────────────────
         // Plants consume terrain nutrients; this is handled in lib.rs
         // but we track internal energy here
         let ne         = self.genome.get(PT_NUTRIENT_EFFICIENCY);
-        let energy_gain = nutrient * ne * (0.5 + 0.5 * (1.0 - effective_shade));
+        let energy_gain = nutrient * ne;
         self.energy    = (self.energy + energy_gain * cfg.plant_energy_gain_rate).min(1.0);
 
         // Elevation penalty — high elevation means harsh conditions
@@ -206,8 +204,7 @@ impl Plant {
 
             PlantStage::Seedling => {
                 let mat_ticks = self.maturation_ticks(cfg);
-                let shade_slowdown = 1.0 + effective_shade * 2.0;
-                if self.age as f32 > mat_ticks as f32 * shade_slowdown {
+                if self.age > mat_ticks {
                     self.stage = PlantStage::Mature;
                     self.age   = 0;
                 }

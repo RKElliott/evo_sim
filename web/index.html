@@ -1132,7 +1132,7 @@ const PLANT_COLOURS = ['#505828','#688040','#90d858','#303820'];
 const PLANT_STRIDE = 13;  // [x,y,stage,radius,consumed, t0..t7]
 const TRAIT_NAMES  = [
   'Drought Tolerance', 'Flood Tolerance', 'Nutrient Efficiency',
-  'Growth Rate', 'Seed Count', 'Seed Spread', 'Size', 'Shade Tolerance'
+  'Size at Maturity', 'Max Age', 'Seed Rate', 'Seed Size', 'Seed Quantity'
 ];
 
 function drawPlants() {
@@ -1166,11 +1166,11 @@ function drawPlants() {
     } else {
       ctx.globalAlpha = Math.max(0.05, 1.0 - cf * 0.9);
       if (stg === 2) {
-        // Mature plants: encode nutrient_efficiency (trait 2) + growth_rate (trait 3)
-        // via color and brightness. Size already encoded in radius.
+        // Mature plants: encode nutrient_efficiency (trait 2) + size_at_maturity (trait 3)
+        // via color and brightness.
         const ne  = plantView[base + 5 + 2];  // nutrient_efficiency
-        const gr  = plantView[base + 5 + 3];  // growth_rate
-        // Normalize to 0-1 (budget=4, 8 traits, avg=0.5, range roughly 0.02-1.5)
+        const gr  = plantView[base + 5 + 3];  // size_at_maturity
+        // Normalize to 0-1 (budget=4.5, 8 traits, avg=0.56, range roughly 0.02-1.5)
         const neN = Math.min(1.0, Math.max(0.0, (ne - 0.02) / 1.48));
         const grN = Math.min(1.0, Math.max(0.0, (gr - 0.02) / 1.48));
         // Hue: 95° (yellow-green, low efficiency) → 135° (deep green, high efficiency)

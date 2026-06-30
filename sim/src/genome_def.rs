@@ -150,27 +150,27 @@ impl Genome {
 pub const PT_DROUGHT_TOLERANCE:   usize = 0;
 pub const PT_FLOOD_TOLERANCE:     usize = 1;
 pub const PT_NUTRIENT_EFFICIENCY: usize = 2;
-pub const PT_GROWTH_RATE:         usize = 3;
-pub const PT_SEED_COUNT:          usize = 4;
-pub const PT_SEED_SPREAD:         usize = 5;
-pub const PT_SIZE:                usize = 6;
-pub const PT_SHADE_TOLERANCE:     usize = 7;
+pub const PT_SIZE_AT_MATURITY:    usize = 3;
+pub const PT_MAX_AGE:             usize = 4;
+pub const PT_SEED_RATE:           usize = 5;
+pub const PT_SEED_SIZE:           usize = 6;
+pub const PT_SEED_QUANTITY:       usize = 7;
 
 /// The standard plant GenomeDef.
 /// Budget = 4.0, 8 traits, default value 0.5 each.
 pub fn plant_genome_def() -> GenomeDef {
     GenomeDef {
         name:   "Standard Plant",
-        budget: 4.0,
+        budget: 4.5,
         traits: vec![
             TraitDef { name: "drought_tolerance",   min: 0.02 },
             TraitDef { name: "flood_tolerance",     min: 0.02 },
             TraitDef { name: "nutrient_efficiency", min: 0.02 },
-            TraitDef { name: "growth_rate",         min: 0.02 },
-            TraitDef { name: "seed_count",          min: 0.02 },
-            TraitDef { name: "seed_spread",         min: 0.02 },
-            TraitDef { name: "size",                min: 0.02 },
-            TraitDef { name: "shade_tolerance",     min: 0.02 },
+            TraitDef { name: "size_at_maturity",    min: 0.02 },
+            TraitDef { name: "max_age",             min: 0.02 },
+            TraitDef { name: "seed_rate",           min: 0.02 },
+            TraitDef { name: "seed_size",           min: 0.02 },
+            TraitDef { name: "seed_quantity",       min: 0.02 },
         ],
     }
 }
