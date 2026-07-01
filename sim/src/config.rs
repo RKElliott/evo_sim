@@ -114,6 +114,21 @@ pub struct Config {
     pub plant_repro_energy_min:         f32,
     pub plant_seed_energy_cost:         f32,
 
+    // ── Energy economy (Stage 4a) ─────────────────────────────────────────
+    /// Energy cap for a plant = size_at_maturity * this (biomass ceiling).
+    pub plant_energy_cap_scale:  f32,
+    /// Baseline intake per tick (lets small plants get started).
+    pub plant_intake_base:       f32,
+    /// Intake per unit current biomass (bigger plants pull more).
+    pub plant_intake_scale:      f32,
+    /// Upkeep per unit current biomass — the metabolic headwind (key dial).
+    pub plant_upkeep_rate:       f32,
+    /// Energy at/below which a plant starves and dies.
+    pub plant_starve_floor:      f32,
+    /// Master switch for seed production (off in the plant lab so the energy
+    /// loop can be tested closed; on in the main world).
+    pub plant_reproduction_enabled: bool,
+
     // -----------------------------------------------------------------------
     // Herbivore settings
     // -----------------------------------------------------------------------
@@ -242,6 +257,12 @@ impl Default for Config {
             plant_highland_penalty_rate:    0.001,
             plant_repro_energy_min:         0.4,
             plant_seed_energy_cost:         0.01,
+            plant_energy_cap_scale:         1.0,
+            plant_intake_base:              0.010,
+            plant_intake_scale:             0.040,
+            plant_upkeep_rate:              0.010,
+            plant_starve_floor:             0.001,
+            plant_reproduction_enabled:     true,
 
             herb_initial_count:       30,
             herb_mutation_rate:       0.06,

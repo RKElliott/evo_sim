@@ -128,32 +128,28 @@ impl Plant {
 
     pub fn update(
         &mut self,
-        terrain:    &Terrain,
-        cfg:        &Config,
-        rng:        &mut Rng,
-        all_plants: &[Plant],   // for pollen search
-        def:        &GenomeDef,
+        cfg:           &Config,
+        rng:           &mut Rng,
+        water_adj:     bool,
+        cell_nutrient: &mut f32,   // live nutrient in the plant's cell (read + fed on)
+        all_plants:    &[Plant],   // for pollen search
+        def:           &GenomeDef,
     ) -> Vec<Genome> {
         if self.stage == PlantStage::Dead { return Vec::new(); }
 
         self.age += 1;
+        let nutrient = *cell_nutrient;
 
-        // Get terrain values at plant position
-        let (nutrient, water_adj, elevation) = self.terrain_values(terrain, cfg);
-
-        // ── Survival checks ──────────────────────────────────────────────
-
-        // Flood check — water-adjacent cells kill flood-intolerant plants
+        // ── Survival checks (acute, random-roll) ─────────────────────────
+        // On death we leave self.energy intact; lib.rs returns it to the soil
+        // during the cull, so every death path conserves biomass.
         if water_adj {
-            let ft   = self.genome.get(PT_FLOOD_TOLERANCE);
-            let risk = (1.0 - ft) * cfg.plant_flood_death_rate;
-            if rng.f32() < risk {
+            let ft = self.genome.get(PT_FLOOD_TOLERANCE);
+            if rng.f32() < (1.0 - ft) * cfg.plant_flood_death_rate {
                 self.stage = PlantStage::Dead;
                 return Vec::new();
             }
         }
-
-        // Drought check — low nutrient cells kill drought-intolerant plants
         if nutrient < cfg.plant_drought_threshold {
             let dt   = self.genome.get(PT_DROUGHT_TOLERANCE);
             let risk = (1.0 - dt) * cfg.plant_drought_death_rate
@@ -164,21 +160,23 @@ impl Plant {
             }
         }
 
-        // ── Nutrient draw ────────────────────────────────────────────────
-        // Plants consume terrain nutrients; this is handled in lib.rs
-        // but we track internal energy here
-        let ne         = self.genome.get(PT_NUTRIENT_EFFICIENCY);
-        let energy_gain = nutrient * ne;
-        self.energy    = (self.energy + energy_gain * cfg.plant_energy_gain_rate).min(1.0);
+        // ── Energy exchange with the soil (conserved) ────────────────────
+        // Net per tick = intake − upkeep, done as two exact transfers: never
+        // more than the cell holds, never past the cap, never below zero — so
+        // total (plant biomass + soil nutrient) is invariant.
+        let cap     = self.genome.get(PT_SIZE_AT_MATURITY) * cfg.plant_energy_cap_scale;
+        let ne      = self.genome.get(PT_NUTRIENT_EFFICIENCY);
+        let desired = (cfg.plant_intake_base + self.energy * cfg.plant_intake_scale) * ne;
+        let room    = (cap - self.energy).max(0.0);
+        let intake  = desired.min(*cell_nutrient).min(room);
+        self.energy    += intake;
+        *cell_nutrient -= intake;
+        let upkeep = (self.energy * cfg.plant_upkeep_rate).min(self.energy);
+        self.energy    -= upkeep;
+        *cell_nutrient += upkeep;
 
-        // Elevation penalty — high elevation means harsh conditions
-        if elevation > cfg.plant_highland_threshold {
-            let penalty = (elevation - cfg.plant_highland_threshold) * cfg.plant_highland_penalty_slope;
-            self.energy -= penalty * cfg.plant_highland_penalty_rate;
-        }
-
-        // Die if energy depleted
-        if self.energy <= 0.0 {
+        // Starvation — remaining biomass returned to soil during the cull.
+        if self.energy <= cfg.plant_starve_floor {
             self.stage = PlantStage::Dead;
             return Vec::new();
         }
@@ -188,9 +186,7 @@ impl Plant {
 
         match self.stage {
             PlantStage::Seed => {
-                // Seeds germinate after a short delay
                 if self.age > cfg.plant_germination_ticks {
-                    // Germination probability based on nutrient and flood/drought
                     let germ_ok = nutrient > cfg.plant_germination_nutrient_min
                         && rng.f32() < cfg.plant_germination_chance;
                     if germ_ok {
@@ -211,7 +207,6 @@ impl Plant {
             }
 
             PlantStage::Mature => {
-                // Age-based mortality
                 let max_age  = cfg.plant_max_age as f32;
                 let age_risk = (self.age as f32 / max_age).powi(2) * 0.001;
                 if rng.f32() < age_risk {
@@ -219,29 +214,22 @@ impl Plant {
                     return Vec::new();
                 }
 
-                // Seed production
-                if self.age % cfg.plant_seed_interval == 0 && self.energy > cfg.plant_repro_energy_min {
+                // Seed production (off in the plant lab so 4a runs closed).
+                if cfg.plant_reproduction_enabled
+                   && self.age % cfg.plant_seed_interval == 0
+                   && self.energy > cfg.plant_repro_energy_min {
                     let n_seeds = self.seeds_per_cycle(cfg);
                     for _ in 0..n_seeds {
                         if rng.f32() < cfg.plant_seed_chance {
-                            // Find pollen donor for sexual reproduction
                             let donor = self.find_pollen_donor(all_plants, cfg, rng);
                             let child_genome = match donor {
-                                Some(d) => {
-                                    utils::trace_event!(Subsystem::Plants, "pollen donor d={:.1}",
-                                        { let dx = d.x - self.x; let dy = d.y - self.y;
-                                          (dx * dx + dy * dy).sqrt() });
-                                    Genome::crossover(
-                                        &self.genome, &d.genome, def,
-                                        cfg.plant_mutation_rate, rng,
-                                    )
-                                },
+                                Some(d) => Genome::crossover(
+                                    &self.genome, &d.genome, def, cfg.plant_mutation_rate, rng),
                                 None => self.genome.mutate(def, cfg.plant_mutation_rate, rng),
                             };
                             new_seeds.push(child_genome);
                         }
                     }
-                    // Seed production costs energy
                     self.energy -= cfg.plant_seed_energy_cost * new_seeds.len() as f32;
                 }
             }
@@ -288,20 +276,8 @@ impl Plant {
     }
 
     /// Get terrain values relevant to this plant's position.
-    fn terrain_values(&self, terrain: &Terrain, cfg: &Config) -> (f32, bool, f32) {
-        if let Some((col, row)) = cfg.world_to_cell(self.x, self.y) {
-            let idx      = row * terrain.cols + col;
-            let nutrient  = terrain.nutrient[idx];
-            let water_adj = self.is_water_adjacent(terrain, col, row);
-            let elevation = terrain.elevation[idx];
-            (nutrient, water_adj, elevation)
-        } else {
-            (0.5, false, 0.5)
-        }
-    }
-
     /// Check if cell is adjacent to water (not necessarily underwater).
-    fn is_water_adjacent(&self, terrain: &Terrain, col: usize, row: usize) -> bool {
+    pub fn is_water_adjacent(&self, terrain: &Terrain, col: usize, row: usize) -> bool {
         for dy in -1i32..=1 {
             for dx in -1i32..=1 {
                 let nc = col as i32 + dx;

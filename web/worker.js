@@ -100,6 +100,7 @@ function sendFrame() {
             diagAvgAge:      sim.diag_avg_age_at_death(),
             diagLocked:      sim.diag_plants_locked(),
             diagEnergy:      sim.diag_avg_energy(),
+            totalEnergy:     sim.total_energy(),
             worldW:          sim.world_w(),
             worldH:          sim.world_h(),
             terrainCols:     sim.terrain_cols(),
@@ -173,6 +174,14 @@ self.onmessage = function(e) {
         case 'clear_plants':
             sim.clear_plants();
             sendFrame();
+            break;
+
+        case 'energy_audit':
+            sim.set_energy_audit(msg.on);
+            break;
+
+        case 'energy_report':
+            postMessage({ type: 'energy_report', data: sim.energy_report() });
             break;
 
         case 'main_world':

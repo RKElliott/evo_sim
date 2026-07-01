@@ -59,22 +59,30 @@ impl Terrain {
         // Background nutrient regeneration — every land cell gets a tiny
         // baseline each tick regardless of flow. Models decomposition,
         // rainfall, and weathering that happens independent of surface flow.
-        // Prevents complete depletion in areas between flow events.
-        for i in 0..self.cols * self.rows {
-            if !self.water[i] {
-                self.nutrient[i] = (self.nutrient[i] + cfg.nutrient_regen_rate)
-                    .min(1.0);
+        // Skipped entirely when regen is off (closed system), so the 1.0 clamp
+        // can't discard biomass that plants have returned to the soil.
+        if cfg.nutrient_regen_rate > 0.0 {
+            for i in 0..self.cols * self.rows {
+                if !self.water[i] {
+                    self.nutrient[i] = (self.nutrient[i] + cfg.nutrient_regen_rate)
+                        .min(1.0);
+                }
             }
         }
 
-        flow_nutrients(
-            &self.elevation,
-            &mut self.nutrient,
-            &self.water,
-            self.cols,
-            self.rows,
-            cfg,
-        );
+        // Skip flow/decay entirely when both are off — in a closed system the
+        // snapshot-based rewrite would otherwise clobber biomass that plants
+        // returned to cells earlier this tick (a conservation leak).
+        if cfg.nutrient_flow_rate > 0.0 || cfg.nutrient_decay_rate > 0.0 {
+            flow_nutrients(
+                &self.elevation,
+                &mut self.nutrient,
+                &self.water,
+                self.cols,
+                self.rows,
+                cfg,
+            );
+        }
         // Update nutrient channel in render buffer
         for i in 0..self.cols * self.rows {
             self.render_buf[i * 4 + 1] = self.nutrient[i];

@@ -35,6 +35,17 @@ use crate::genome_def::plant_genome_def;
 #[cfg(feature = "trace")]
 use utils::tracer::{self, Subsystem};
 
+/// Per-phase energy ledger for the conservation audit. Each field accumulates
+/// the net energy change (all plant biomass + all soil nutrient, summed in f64)
+/// introduced by one phase of the tick. In a closed system every phase except
+/// intended transfers should read ~0; any nonzero value names the leak.
+#[derive(Default, Clone)]
+struct EnergyAudit {
+    prev: f64, start: f64,
+    terrain: f64, plants: f64, germ: f64, cull: f64, rest: f64,
+    residual: f64, ticks: u64,
+}
+
 #[wasm_bindgen]
 pub struct SimWorld {
     terrain:         terrain::Terrain,
@@ -81,6 +92,8 @@ pub struct SimWorld {
     pub diag_age_death_sum:  u32,   // sum of ages at starvation death
     pub diag_plants_locked:  u32,   // plants with being_eaten=true (snapshot)
     pub diag_energy_sum:     f32,   // sum of all herb energies (for avg)
+    energy_audit: bool,
+    aud: EnergyAudit,
 }
 
 #[wasm_bindgen]
@@ -138,6 +151,8 @@ impl SimWorld {
             tag_log:         Vec::new(),
             n_carns_active:  0,
             carn_grid:       spatial::SpatialGrid::new(world_w, world_h, 120.0),
+            energy_audit: false,
+            aud: EnergyAudit::default(),
         };
         w.write_plant_buffer();
         w.write_herb_buffer();
@@ -215,6 +230,8 @@ impl SimWorld {
             tag_log:         Vec::new(),
             n_carns_active:  0,
             carn_grid:       spatial::SpatialGrid::new(800.0, 400.0, 80.0),
+            energy_audit: false,
+            aud: EnergyAudit::default(),
         };
         w.write_plant_buffer();
         w.write_herb_buffer();
@@ -238,6 +255,11 @@ impl SimWorld {
         cfg.terrain_seed       = 42;
         cfg.initial_plants     = 0;      // empty — user places plants
         cfg.herb_initial_count = 0;
+        // Closed system for the 4a energy-conservation test:
+        cfg.nutrient_regen_rate      = 0.0;
+        cfg.nutrient_decay_rate      = 0.0;
+        cfg.nutrient_flow_rate       = 0.0;
+        cfg.plant_reproduction_enabled = false;
 
         let terrain = terrain::Terrain::new(&cfg);
         let rng     = Rng::new(cfg.terrain_seed);
@@ -276,6 +298,8 @@ impl SimWorld {
             tag_log:         Vec::new(),
             n_carns_active:  0,
             carn_grid:       spatial::SpatialGrid::new(800.0, 400.0, 80.0),
+            energy_audit: false,
+            aud: EnergyAudit::default(),
         };
         w.write_plant_buffer();
         w.write_herb_buffer();
@@ -289,13 +313,14 @@ impl SimWorld {
     /// `mature` drops a ready-to-reproduce plant; otherwise a fresh seed.
     pub fn add_plant(&mut self, x: f32, y: f32, mature: bool) {
         let genome = crate::genome_def::Genome::random(&self.plant_def, &mut self.rng);
+        let cap    = genome.get(genome_def::PT_SIZE_AT_MATURITY) * self.cfg.plant_energy_cap_scale;
         let mut p  = Plant::new_seed(x, y, genome);
         if mature {
             p.stage  = PlantStage::Mature;
             p.age    = 0;
-            p.energy = self.rng.range(0.5, 0.9);   // varied reserve
+            p.energy = cap * self.rng.range(0.7, 1.0);   // near full size, varied
         } else {
-            p.energy = self.rng.range(0.10, 0.20); // slight variation
+            p.energy = (cap * self.rng.range(0.08, 0.18)).max(self.cfg.plant_starve_floor * 3.0);
         }
         if let Some((col, row)) = self.cfg.world_to_cell(x, y) {
             self.occupancy.occupy(col, row);
@@ -359,6 +384,8 @@ impl SimWorld {
             tag_log:         Vec::new(),
             n_carns_active:  0,
             carn_grid:       spatial::SpatialGrid::new(world_w, world_h, 120.0),
+            energy_audit: false,
+            aud: EnergyAudit::default(),
         };
         w.write_plant_buffer();
         w.write_herb_buffer();
@@ -373,7 +400,9 @@ impl SimWorld {
     pub fn update(&mut self) {
         utils::trace_scope!(Subsystem::World, "update_loop");
         self.frame += 1;
+        self.aud_begin();
         self.terrain.update(&self.cfg);
+        self.aud_mark(1);
 
         // Delayed carnivore spawn — wait until herbs have established and concentrated
         if self.carns.is_empty()
@@ -615,10 +644,17 @@ impl SimWorld {
             let plants_ref = unsafe {
                 std::slice::from_raw_parts(self.plants.as_ptr(), n_plants)
             };
+            // Resolve the plant's cell; skip if off-map.
+            let (col, row) = match self.cfg.world_to_cell(self.plants[i].x, self.plants[i].y) {
+                Some(c) => c, None => continue,
+            };
+            let idx = row * self.terrain.cols + col;
+            let water_adj = self.plants[i].is_water_adjacent(&self.terrain, col, row);
             let seeds = self.plants[i].update(
-                &self.terrain,
                 &self.cfg,
                 &mut self.rng,
+                water_adj,
+                &mut self.terrain.nutrient[idx],
                 plants_ref,
                 &self.plant_def,
             );
@@ -636,6 +672,7 @@ impl SimWorld {
             }
         }
 
+        self.aud_mark(2);
         // Germinate new seeds
         for (x, y, genome) in new_seeds {
             if let Some((col, row)) = self.cfg.world_to_cell(x, y) {
@@ -647,15 +684,20 @@ impl SimWorld {
             }
         }
 
+        self.aud_mark(3);
         // Release occupancy for dead plants, then cull
         for p in &self.plants {
             if !p.is_alive() {
                 if let Some((col, row)) = self.cfg.world_to_cell(p.x, p.y) {
+                    // Return biomass to soil — conserves total energy on every death.
+                    let idx = row * self.terrain.cols + col;
+                    self.terrain.nutrient[idx] += p.energy;
                     self.occupancy.release(col, row);
                 }
             }
         }
         self.plants.retain(|p| p.is_alive());
+        self.aud_mark(4);
         utils::trace_event!(Subsystem::Plants, "{} live plants after update", self.plants.len());
         }
 
@@ -860,6 +902,8 @@ impl SimWorld {
             self.herb_buf.resize(needed_h * 2, 0.0);
         }
 
+        self.aud_mark(5);
+
         // Update snapshot diagnostics
         self.diag_plants_locked = self.plants.iter()
             .filter(|p| p.being_eaten).count() as u32;
@@ -891,6 +935,51 @@ impl SimWorld {
     }
 
     /// Export the tagged agent's recorded time-series as CSV.
+    fn total_energy_f64(&self) -> f64 {
+        let p: f64 = self.plants.iter().map(|p| p.energy as f64).sum();
+        let s: f64 = self.terrain.nutrient.iter().map(|n| *n as f64).sum();
+        p + s
+    }
+    fn aud_begin(&mut self) {
+        if !self.energy_audit { return; }
+        let t = self.total_energy_f64();
+        self.aud.prev = t; self.aud.start = t; self.aud.ticks += 1;
+    }
+    fn aud_mark(&mut self, which: u8) {
+        if !self.energy_audit { return; }
+        let cur = self.total_energy_f64();
+        let d = cur - self.aud.prev;
+        self.aud.prev = cur;
+        match which {
+            1 => self.aud.terrain += d,
+            2 => self.aud.plants  += d,
+            3 => self.aud.germ    += d,
+            4 => self.aud.cull    += d,
+            5 => { self.aud.rest += d; self.aud.residual += cur - self.aud.start; }
+            _ => {}
+        }
+    }
+    pub fn set_energy_audit(&mut self, on: bool) {
+        self.energy_audit = on;
+        if on { self.aud = EnergyAudit::default(); }
+    }
+    pub fn energy_report(&self) -> String {
+        let t = self.aud.ticks.max(1) as f64;
+        format!(
+            "audit: {} ticks. Per-tick avg energy change by phase (should be ~0):\n               terrain.update : {:+.6}\n  plant pass (feed/upkeep/death-mark) : {:+.6}\n               germination : {:+.6}\n  cull (death-return) : {:+.6}\n               rest (herbs/carns/repro) : {:+.6}\n  === NET residual/tick : {:+.6}  (total {:+.4})",
+            self.aud.ticks,
+            self.aud.terrain/t, self.aud.plants/t, self.aud.germ/t,
+            self.aud.cull/t, self.aud.rest/t, self.aud.residual/t, self.aud.residual)
+    }
+
+    /// Total world energy: all plant biomass + all soil nutrient. In a closed
+    /// system (lab: regen/decay off) this is invariant — the 4a conservation check.
+    pub fn total_energy(&self) -> f32 {
+        let plant: f32 = self.plants.iter().map(|p| p.energy).sum();
+        let soil:  f32 = self.terrain.nutrient.iter().sum();
+        plant + soil
+    }
+
     pub fn export_agent_csv(&self) -> String {
         let mut s = String::from(
             "frame,generation,kind,id,x,y,state,energy,age,speed,alive,target_dist,alarmed_cd\n");

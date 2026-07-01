@@ -222,7 +222,7 @@
         <span class="hud-value" id="h-seeds">—</span>
       </div>
       <div class="hud-row">
-        <span class="hud-label">Nutrient range</span>
+        <span class="hud-label">Total energy ΣE</span>
         <span class="hud-value amber" id="h-nutr">—</span>
       </div>
       <div class="hud-row">
@@ -336,6 +336,7 @@
         <button class="btn" id="place-mature" onclick="setPlace('mature')">Mature</button>
       </div>
       <button class="btn danger" onclick="clearPlants()">Clear Plants</button>
+      <button class="btn" id="btn-audit" onclick="toggleAudit()">⚖ Energy Audit</button>
       <div style="color:#6a7a8a;font-size:11px;border-top:1px solid #2a3648;padding-top:6px">
         Seasons sliders land here next.</div>
     </div>
@@ -953,6 +954,11 @@ function handleWorkerMessage(e) {
       break;
     }
 
+    case 'energy_report':
+      console.log(msg.data);
+      alert(msg.data);
+      break;
+
     case 'inspect_data': {
       if (!inspectReq || msg.kind !== inspectReq.kind || Number(msg.id) !== inspectReq.id) break;
       const el = document.getElementById('inspector-traits');
@@ -1465,7 +1471,8 @@ function updateHUD() {
   document.getElementById('h-locked').textContent   = stats.diagLocked;
   document.getElementById('h-energy').textContent   =
     stats.nHerbs > 0 ? stats.diagEnergy.toFixed(1) : '—';
-  document.getElementById('h-nutr').textContent     = '—';
+  document.getElementById('h-nutr').textContent     =
+    (stats.totalEnergy != null) ? stats.totalEnergy.toFixed(2) : '—';
 }
 
 // ---------------------------------------------------------------------------
@@ -1618,6 +1625,15 @@ window.toggleSettings = function() {
 };
 window.loadPlantLab = function() { worker.postMessage({ type:'plant_lab' }); };
 window.clearPlants  = function() { worker.postMessage({ type:'clear_plants' }); };
+let auditOn = false;
+window.toggleAudit = function() {
+  auditOn = !auditOn;
+  worker.postMessage({ type:'energy_audit', on: auditOn });
+  const btn = document.getElementById('btn-audit');
+  btn.textContent = auditOn ? '⚖ Audit ● recording' : '⚖ Energy Audit';
+  btn.className   = auditOn ? 'btn active' : 'btn';
+  if (!auditOn) worker.postMessage({ type:'energy_report' });
+};
 window.setPlace = function(mode) {
   const wantMature = (mode==='mature');
   if (placeMode && placeMature===wantMature) { placeMode=false; }
